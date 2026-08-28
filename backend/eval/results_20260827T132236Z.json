@@ -1,0 +1,46 @@
+[
+  {
+    "user_input":"What is the candidate's name?",
+    "retrieved_contexts":[
+      ""
+    ],
+    "response":"The context does not contain enough information to identify the candidate's name.",
+    "reference":"Sachin Singh",
+    "faithfulness":1.0,
+    "answer_relevancy":0.0,
+    "context_precision":0.0,
+    "context_recall":0.0
+  },
+  {
+    "user_input":"How many years of Node.js backend experience does the candidate have?",
+    "retrieved_contexts":[
+      "Sachin Singh Full Stack & AI Engineer GenAl and Agentic Systems Prayagraj, Uttar Pradesh 7041200380 I I I [linkedin.com\/in\/sachin-singh](https:\/\/linkedin.com\/in\/sachin-singh)  [github.com\/sachin-11](https:\/\/github.com\/sachin-11)  [portfolio.rasuonline.in](https:\/\/portfolio.rasuonline.in\/)   rajeshsa…",
+      "prompt optimizer [web.scrapping.rasuonline.in](https:\/\/web.scrapping.rasuonline.in\/)  [hr-policy.rasuonline.in](https:\/\/hr-policy.rasuonline.in\/)  [token.rasuonline.in](https:\/\/token.rasuonline.in\/)  TECHNICAL SKILLS GENAI OpenAl GPT-4o and GPT-4o-mini, Groq LLaMA-3.3, LangChain, LangGraph, RAG (Ret…",
+      "DronStudy Gurugram Jan 2018 Dec 2018 Software Developer \/ Junior Software Engineer,  Node.js  Built REST APIs in for the live class feature, covering streaming and WebSocket-based real-time communication between tutors and students, and worked with the frontend  Node.js  team on integration. Worked…",
+      "Built dashboards for campaign management and delivery analytics, with WebSocket-driven live status updates so operators saw delivery receipts as they landed.  React.js  Added Stripe subscriptions and ACH direct debit, and built the SMS credit wallet with transactional logging and auto top-up. Tuned…",
+      ", Terraform, CI\/CD PLATFORM NextAuth.js, JWT, OAuth, RBAC, bcrypt, Stripe, ACH, Apple Pay, BullMQ, SSE, Twilio, Playwright EXPERIENCE Moon Technolabs Ahmedabad Sr. Developer (full stack and GenAl scope)  Node.js  Jul 2023 Jul 2026 AI Interview Agent, a production GenAl SaaS Built backend APIs for Al…"
+    ],
+    "response":"The candidate has **7+ years of backend experience**, with Node.js listed as a core backend skill and Node.js backend work shown from early roles onward [1][2][3].",
+    "reference":"7+ years",
+    "faithfulness":0.6666666667,
+    "answer_relevancy":0.837090197,
+    "context_precision":0.0,
+    "context_recall":1.0
+  },
+  {
+    "user_input":"What company did the candidate work at most recently, and as what role?",
+    "retrieved_contexts":[
+      "prompt optimizer [web.scrapping.rasuonline.in](https:\/\/web.scrapping.rasuonline.in\/)  [hr-policy.rasuonline.in](https:\/\/hr-policy.rasuonline.in\/)  [token.rasuonline.in](https:\/\/token.rasuonline.in\/)  TECHNICAL SKILLS GENAI OpenAl GPT-4o and GPT-4o-mini, Groq LLaMA-3.3, LangChain, LangGraph, RAG (Ret…",
+      "Built dashboards for campaign management and delivery analytics, with WebSocket-driven live status updates so operators saw delivery receipts as they landed.  React.js  Added Stripe subscriptions and ACH direct debit, and built the SMS credit wallet with transactional logging and auto top-up. Tuned…",
+      "Sachin Singh Full Stack & AI Engineer GenAl and Agentic Systems Prayagraj, Uttar Pradesh 7041200380 I I I [linkedin.com\/in\/sachin-singh](https:\/\/linkedin.com\/in\/sachin-singh)  [github.com\/sachin-11](https:\/\/github.com\/sachin-11)  [portfolio.rasuonline.in](https:\/\/portfolio.rasuonline.in\/)   rajeshsa…",
+      "DronStudy Gurugram Jan 2018 Dec 2018 Software Developer \/ Junior Software Engineer,  Node.js  Built REST APIs in for the live class feature, covering streaming and WebSocket-based real-time communication between tutors and students, and worked with the frontend  Node.js  team on integration. Worked…",
+      ", Terraform, CI\/CD PLATFORM NextAuth.js, JWT, OAuth, RBAC, bcrypt, Stripe, ACH, Apple Pay, BullMQ, SSE, Twilio, Playwright EXPERIENCE Moon Technolabs Ahmedabad Sr. Developer (full stack and GenAl scope)  Node.js  Jul 2023 Jul 2026 AI Interview Agent, a production GenAl SaaS Built backend APIs for Al…"
+    ],
+    "response":"The candidate most recently worked at **Moon Technolabs, Ahmedabad** as a **Sr. Developer (full stack and GenAI scope)** [5].",
+    "reference":"Moon Technolabs, as Sr. Node.js Developer (full stack and GenAI scope)",
+    "faithfulness":1.0,
+    "answer_relevancy":0.8930990671,
+    "context_precision":0.2,
+    "context_recall":0.0
+  }
+]

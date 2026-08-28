@@ -1,0 +1,27 @@
+[
+  {
+    "question": "How many paid time off days do full-time employees get per year at Nimbus Robotics?",
+    "ground_truth_answer": "Full-time employees at Nimbus Robotics receive 20 paid time off days per year, accrued monthly.",
+    "expected_context": "Full-time employees accrue 20 PTO days per year, credited at a rate of 1.67 days per month of employment."
+  },
+  {
+    "question": "What is the maximum amount an employee can be reimbursed for home office equipment?",
+    "ground_truth_answer": "Employees can be reimbursed up to $500 per calendar year for home office equipment.",
+    "expected_context": "Nimbus Robotics reimburses up to $500 per calendar year for home office equipment purchases, including monitors, chairs, and desks."
+  },
+  {
+    "question": "How often are company laptops refreshed?",
+    "ground_truth_answer": "Company laptops are refreshed every 3 years under the standard hardware refresh cycle.",
+    "expected_context": "Standard-issue laptops follow a 3-year refresh cycle. Employees may request an early refresh if their device fails a hardware diagnostic."
+  },
+  {
+    "question": "Can employees work remotely full-time, or is there a minimum in-office requirement?",
+    "ground_truth_answer": "Employees must work from the office at least 2 days per week; the remaining days can be remote.",
+    "expected_context": "Nimbus Robotics operates a hybrid work policy requiring a minimum of 2 in-office days per week, with the remaining days available for remote work."
+  },
+  {
+    "question": "How long does Nimbus Robotics retain employee records after termination?",
+    "ground_truth_answer": "Nimbus Robotics retains employee records for 7 years after termination of employment.",
+    "expected_context": "Per the data retention policy, employee records are retained for a period of 7 years following termination, after which they are securely destroyed."
+  }
+]

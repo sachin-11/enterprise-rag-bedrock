@@ -1,0 +1,126 @@
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.concurrency import run_in_threadpool
+
+from app.api.chat import _run_rag_pipeline
+from app.core.config import settings
+from app.core.dependencies import require_admin
+from app.models.admin import ErrorsResponse, MembersResponse, OrgMemberRow, OrgStatsResponse, RetryResponse
+from app.models.user import CurrentUser, GenerateInviteRequest, GenerateInviteResponse, MessageResponse
+from app.services import admin_service, auth_service, email_service, invite_service
+from app.services.admin_service import AdminError
+from app.services.auth_service import AuthError
+from app.services.email_service import EmailSendError
+
+router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+@router.get("/stats", response_model=OrgStatsResponse)
+async def get_stats(days: int = 7, current_user: CurrentUser = Depends(require_admin)) -> OrgStatsResponse:
+    return await run_in_threadpool(admin_service.get_org_stats, current_user.tenant_id, days)
+
+
+@router.get("/errors", response_model=ErrorsResponse)
+async def get_errors(limit: int = 20, current_user: CurrentUser = Depends(require_admin)) -> ErrorsResponse:
+    errors = await run_in_threadpool(admin_service.get_recent_errors, current_user.tenant_id, limit)
+    return ErrorsResponse(errors=errors)
+
+
+@router.get("/users", response_model=MembersResponse)
+async def get_users(days: int = 7, current_user: CurrentUser = Depends(require_admin)) -> MembersResponse:
+    def _load() -> MembersResponse:
+        members = auth_service.list_org_members(current_user.tenant_id)
+        breakdown = admin_service.get_user_breakdown(current_user.tenant_id, days)
+        rows = []
+        for member in members:
+            stats = breakdown.get(member.user_id)
+            rows.append(
+                OrgMemberRow(
+                    sub=member.user_id,
+                    email=member.email,
+                    enabled=member.enabled,
+                    status=member.status,
+                    is_self=member.user_id == current_user.user_id,
+                    query_count=stats.query_count if stats else 0,
+                    total_cost=stats.total_cost if stats else 0.0,
+                    avg_latency_s=stats.avg_latency_s if stats else None,
+                )
+            )
+        return MembersResponse(members=rows)
+
+    return await run_in_threadpool(_load)
+
+
+@router.post("/users/{sub}/suspend", response_model=MessageResponse)
+async def suspend(sub: str, current_user: CurrentUser = Depends(require_admin)) -> MessageResponse:
+    try:
+        await run_in_threadpool(auth_service.suspend_user, current_user.tenant_id, sub, current_user.user_id)
+    except AuthError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return MessageResponse(message="User suspended.")
+
+
+@router.post("/users/{sub}/unsuspend", response_model=MessageResponse)
+async def unsuspend(sub: str, current_user: CurrentUser = Depends(require_admin)) -> MessageResponse:
+    try:
+        await run_in_threadpool(auth_service.unsuspend_user, current_user.tenant_id, sub)
+    except AuthError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return MessageResponse(message="User unsuspended.")
+
+
+@router.post("/invites", response_model=GenerateInviteResponse)
+async def create_invite(
+    payload: GenerateInviteRequest, current_user: CurrentUser = Depends(require_admin)
+) -> GenerateInviteResponse:
+    token = invite_service.generate_invite_token(current_user.tenant_id)
+    invite_url = f"{settings.frontend_base_url}/join?token={token}"
+
+    try:
+        await run_in_threadpool(
+            email_service.send_invite_email, payload.email, current_user.tenant_id, invite_url
+        )
+    except EmailSendError as exc:
+        # Never a hard failure — the admin still has the link on-screen to
+        # send manually (e.g. SES sandbox mode rejects unverified
+        # recipients until production access is granted).
+        return GenerateInviteResponse(invite_url=invite_url, email_sent=False, email_error=str(exc))
+
+    return GenerateInviteResponse(invite_url=invite_url, email_sent=True)
+
+
+@router.post("/errors/{run_id}/retry", response_model=RetryResponse)
+async def retry(run_id: str, current_user: CurrentUser = Depends(require_admin)) -> RetryResponse:
+    """Re-runs a previously-failed query as a smoke test only — nothing is
+    written to DynamoDB or any user's conversation. See admin_service's
+    get_retry_inputs docstring for why this shape was chosen over replaying
+    into the original user's chat history.
+    """
+    try:
+        inputs = await run_in_threadpool(admin_service.get_retry_inputs, current_user.tenant_id, run_id)
+    except AdminError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    kb_id = settings.bedrock_kb_id
+    if not kb_id:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="BEDROCK_KB_ID is not configured."
+        )
+
+    collected_text: list[str] = []
+    had_error = False
+    error_detail = ""
+
+    async for kind, data in _run_rag_pipeline(
+        inputs["query"], inputs["chat_history"], current_user.tenant_id, kb_id, current_user.user_id, current_user.is_admin
+    ):
+        if kind in ("token", "guardrail"):
+            collected_text.append(data)
+        elif kind == "error":
+            had_error = True
+            error_detail = data
+
+    if had_error:
+        return RetryResponse(succeeded=False, error=error_detail)
+
+    answer_text = "".join(collected_text)
+    return RetryResponse(succeeded=True, answer_preview=answer_text[:300])
