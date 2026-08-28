@@ -11,6 +11,10 @@ class MessageRecord(BaseModel):
     content: str
     sources: list[SourceCitation] = Field(default_factory=list)
     created_at: datetime
+    # The LangSmith trace id for this answer — set on assistant messages only,
+    # lets the frontend attach 👍/👎 feedback to the right run even after a
+    # reload (see app/services/feedback_service.py).
+    run_id: str | None = None
 
 
 class ConversationSummary(BaseModel):

@@ -243,12 +243,20 @@ export default function AdminPage() {
         </section>
 
         {/* Stat cards */}
-        <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-5">
           {[
             { label: "Queries", value: stats ? stats.query_count.toLocaleString() : null },
             { label: "Total cost", value: stats ? formatCost(stats.total_cost) : null },
             { label: "Avg / p95 latency", value: stats ? `${formatSeconds(stats.avg_latency_s)} / ${formatSeconds(stats.p95_latency_s)}` : null },
             { label: "Error rate", value: stats ? `${(stats.error_rate * 100).toFixed(1)}%` : null },
+            {
+              label: "Helpful",
+              value: stats
+                ? stats.feedback_count === 0
+                  ? "No feedback yet"
+                  : `${(stats.feedback_positive_rate * 100).toFixed(0)}% (${stats.feedback_count})`
+                : null,
+            },
           ].map((card) => (
             <div key={card.label} className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
               <p className="text-xs font-medium uppercase tracking-wide text-gray-500">{card.label}</p>

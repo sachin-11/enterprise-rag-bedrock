@@ -20,6 +20,7 @@ from langsmith import Client
 
 from app.core.config import settings
 from app.models.admin import ErrorRow, OrgStatsResponse
+from app.services.feedback_service import FEEDBACK_KEY
 
 PIPELINE_RUN_NAME = "chat_query_pipeline"
 LANGSMITH_APP_BASE_URL = "https://smith.langchain.com"
@@ -78,6 +79,29 @@ def _latency_stats(latencies_s: list[float]) -> tuple[float, float, float]:
     return avg, p50, p95
 
 
+def _feedback_stats(client: Client, run_ids: list[str]) -> tuple[int, float]:
+    """Returns (feedback_count, positive_rate) for the given run_ids' "user_score" feedback.
+
+    A run can be rated more than once (see feedback_service.py's known v1
+    gap — a reload doesn't know a run was already rated) — every submission
+    counts individually here, same as LangSmith's own feedback tab does.
+    """
+    if not run_ids:
+        return 0, 0.0
+
+    entries = list(
+        islice(
+            client.list_feedback(run_ids=run_ids, feedback_key=[FEEDBACK_KEY]),
+            MAX_RUNS_PER_QUERY,
+        )
+    )
+    if not entries:
+        return 0, 0.0
+
+    positive = sum(1 for entry in entries if entry.score)
+    return len(entries), positive / len(entries)
+
+
 def get_org_stats(tenant_id: str, days: int = 7) -> OrgStatsResponse:
     client = _langsmith_client()
     since = datetime.now(timezone.utc) - timedelta(days=days)
@@ -88,7 +112,7 @@ def get_org_stats(tenant_id: str, days: int = 7) -> OrgStatsResponse:
                 project_name=settings.langsmith_project,
                 filter=_tenant_filter(tenant_id),
                 start_time=since,
-                select=["start_time", "end_time", "total_cost", "status"],
+                select=["id", "start_time", "end_time", "total_cost", "status"],
             ),
             MAX_RUNS_PER_QUERY,
         )
@@ -103,6 +127,7 @@ def get_org_stats(tenant_id: str, days: int = 7) -> OrgStatsResponse:
         if row.start_time is not None and row.end_time is not None
     ]
     avg_latency_s, p50_latency_s, p95_latency_s = _latency_stats(latencies_s)
+    feedback_count, feedback_positive_rate = _feedback_stats(client, [str(row.id) for row in rows])
 
     return OrgStatsResponse(
         query_count=query_count,
@@ -112,6 +137,8 @@ def get_org_stats(tenant_id: str, days: int = 7) -> OrgStatsResponse:
         avg_latency_s=avg_latency_s,
         p50_latency_s=p50_latency_s,
         p95_latency_s=p95_latency_s,
+        feedback_count=feedback_count,
+        feedback_positive_rate=feedback_positive_rate,
     )
 
 

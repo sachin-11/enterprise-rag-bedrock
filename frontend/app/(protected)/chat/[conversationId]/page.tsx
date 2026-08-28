@@ -32,6 +32,7 @@ export default function ConversationPage() {
             role: message.role,
             content: message.content,
             sources: message.sources.length > 0 ? message.sources : undefined,
+            runId: message.run_id,
           })),
         );
       })

@@ -16,3 +16,9 @@ class SourceCitation(BaseModel):
     chunk_id: str
     doc_name: str
     excerpt: str
+
+
+class FeedbackRequest(BaseModel):
+    run_id: str
+    is_positive: bool
+    comment: Optional[str] = None

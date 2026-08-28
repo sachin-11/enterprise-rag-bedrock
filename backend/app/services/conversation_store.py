@@ -110,6 +110,7 @@ def get_conversation(user_id: str, conversation_id: str) -> Optional[Conversatio
             content=message["content"],
             sources=[SourceCitation(**source) for source in message.get("sources", [])],
             created_at=message["created_at"],
+            run_id=message.get("run_id"),
         )
         for message in messages_response.get("Items", [])
     ]
@@ -123,17 +124,20 @@ def get_conversation(user_id: str, conversation_id: str) -> Optional[Conversatio
     )
 
 
-def append_message(conversation_id: str, role: str, content: str, sources: list[SourceCitation]) -> None:
-    _messages_table().put_item(
-        Item={
-            "conversation_id": conversation_id,
-            "sort_key": _new_message_sort_key(),
-            "role": role,
-            "content": content,
-            "sources": [source.model_dump() for source in sources],
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-    )
+def append_message(
+    conversation_id: str, role: str, content: str, sources: list[SourceCitation], run_id: Optional[str] = None
+) -> None:
+    item = {
+        "conversation_id": conversation_id,
+        "sort_key": _new_message_sort_key(),
+        "role": role,
+        "content": content,
+        "sources": [source.model_dump() for source in sources],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if run_id is not None:
+        item["run_id"] = run_id
+    _messages_table().put_item(Item=item)
 
 
 def touch_conversation(user_id: str, conversation_id: str) -> None:

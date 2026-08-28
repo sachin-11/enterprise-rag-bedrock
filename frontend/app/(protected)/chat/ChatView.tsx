@@ -6,12 +6,14 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { apiFetch } from "../../lib/auth";
 import { useAuth } from "../../context/AuthProvider";
+import { submitFeedback } from "../../lib/chat";
 import { ALLOWED_EXTENSIONS, isAllowedFile, syncKnowledgeBase, uploadFile } from "../../lib/documents";
 import type { Message, Source } from "./types";
 
 interface StreamEvent {
-  type: "conversation" | "sources" | "token" | "error" | "done";
+  type: "conversation" | "run_id" | "sources" | "token" | "error" | "done";
   conversation_id?: string;
+  run_id?: string;
   sources?: Source[];
   text?: string;
   detail?: string;
@@ -180,6 +182,7 @@ export function ChatView({ conversationId, initialMessages }: ChatViewProps) {
 
     let text = "";
     let sources: Source[] | undefined;
+    let runId: string | undefined;
     let newConversationId: string | null = null;
     let isError = false;
 
@@ -191,6 +194,8 @@ export function ChatView({ conversationId, initialMessages }: ChatViewProps) {
           // unmount this component (different route = different page.tsx)
           // and silently drop whatever hasn't streamed in yet.
           newConversationId = event.conversation_id;
+        } else if (event.type === "run_id" && event.run_id) {
+          runId = event.run_id;
         } else if (event.type === "sources" && event.sources) {
           // Captured but not shown yet — sources arrive before generation
           // even starts, so surfacing them immediately would show a
@@ -211,7 +216,7 @@ export function ChatView({ conversationId, initialMessages }: ChatViewProps) {
       text = `Something went wrong: ${error instanceof Error ? error.message : "unknown error"}`;
     }
 
-    setMessages((prev) => [...prev, { id: createId(), role: "assistant", content: text, sources, isError }]);
+    setMessages((prev) => [...prev, { id: createId(), role: "assistant", content: text, sources, isError, runId }]);
     setStreamingMessage(null);
     setIsLoading(false);
 
@@ -237,6 +242,18 @@ export function ChatView({ conversationId, initialMessages }: ChatViewProps) {
     [handleSend],
   );
 
+  const handleFeedback = useCallback((messageId: string, runId: string, isPositive: boolean) => {
+    // Optimistic: lock in the choice immediately, revert only if the
+    // request actually fails — same pattern as the suspend/unsuspend
+    // toggle on the admin dashboard.
+    setMessages((prev) =>
+      prev.map((m) => (m.id === messageId ? { ...m, feedback: isPositive ? "up" : "down" } : m)),
+    );
+    submitFeedback(runId, isPositive).catch(() => {
+      setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, feedback: undefined } : m)));
+    });
+  }, []);
+
   return (
     <main className="flex min-h-0 flex-1 flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6">
@@ -247,7 +264,7 @@ export function ChatView({ conversationId, initialMessages }: ChatViewProps) {
         ) : (
           <div className="mx-auto flex max-w-2xl flex-col gap-5">
             {messages.map((message) => (
-              <ChatBubble key={message.id} message={message} />
+              <ChatBubble key={message.id} message={message} onFeedback={handleFeedback} />
             ))}
 
             {isLoading && streamingMessage === null && <LoadingBubble />}
@@ -395,12 +412,22 @@ function UploadCard({ upload }: { upload: NonNullable<Message["upload"]> }) {
   );
 }
 
-function ChatBubble({ message }: { message: Message }) {
+function ChatBubble({
+  message,
+  onFeedback,
+}: {
+  message: Message;
+  onFeedback?: (messageId: string, runId: string, isPositive: boolean) => void;
+}) {
   if (message.upload) {
     return <UploadCard upload={message.upload} />;
   }
 
   const isUser = message.role === "user";
+  // No feedback on error bubbles (nothing real to rate) or before the
+  // stream has finished (message.runId is only set on the final, promoted
+  // message — see handleSend — never on the in-progress streaming bubble).
+  const showFeedback = !isUser && !message.isError && message.runId && onFeedback;
 
   return (
     <div className={`flex items-start gap-3 ${isUser ? "flex-row-reverse" : ""}`}>
@@ -434,6 +461,31 @@ function ChatBubble({ message }: { message: Message }) {
               ))}
             </ul>
           </details>
+        )}
+
+        {showFeedback && (
+          <div className="mt-2 flex items-center gap-1 border-t border-gray-100 pt-2">
+            <button
+              onClick={() => onFeedback(message.id, message.runId!, true)}
+              aria-label="Good answer"
+              title="Good answer"
+              className={`rounded-md px-1.5 py-0.5 text-sm transition-opacity ${
+                message.feedback === "up" ? "opacity-100" : "opacity-40 hover:opacity-70"
+              }`}
+            >
+              👍
+            </button>
+            <button
+              onClick={() => onFeedback(message.id, message.runId!, false)}
+              aria-label="Bad answer"
+              title="Bad answer"
+              className={`rounded-md px-1.5 py-0.5 text-sm transition-opacity ${
+                message.feedback === "down" ? "opacity-100" : "opacity-40 hover:opacity-70"
+              }`}
+            >
+              👎
+            </button>
+          </div>
         )}
       </div>
     </div>

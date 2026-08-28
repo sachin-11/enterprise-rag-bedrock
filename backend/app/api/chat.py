@@ -12,10 +12,11 @@ from langsmith import get_current_run_tree, traceable
 
 from app.core.config import settings
 from app.core.dependencies import get_current_user
-from app.models.chat import ChatQueryRequest, SourceCitation
-from app.models.user import CurrentUser
+from app.models.chat import ChatQueryRequest, FeedbackRequest, SourceCitation
+from app.models.user import CurrentUser, MessageResponse
 from app.services.bedrock_kb_service import BedrockKBError, KBRetrievalResult, retrieve_from_kb
 from app.services.conversation_store import append_message, create_conversation, get_conversation, touch_conversation
+from app.services.feedback_service import FeedbackError, submit_feedback
 from app.services.guardrail_service import check_content
 from app.services.query_service import generate_hyde_passage, rewrite_query
 from app.services.retrieval_service import rerank_with_cohere
@@ -91,6 +92,15 @@ async def _run_rag_pipeline(
     An async generator (not a plain return) so the caller can stream the
     answer to the client token-by-token instead of blocking on the full
     response. Yields (kind, payload) tuples:
+      - ("run_id", str)                      — once, first — the LangSmith
+                                                trace id for this answer, so
+                                                the client can attach 👍/👎
+                                                feedback to it later (see
+                                                feedback_service.py). Yielded
+                                                even for a guardrail-blocked
+                                                or failed answer — those are
+                                                still worth being able to
+                                                downvote as false positives.
       - ("sources", list[SourceCitation])   — once, before generation starts
       - ("token", str)                       — repeatedly, as text streams in
       - ("guardrail", str)                   — once, if the INPUT guardrail
@@ -124,6 +134,7 @@ async def _run_rag_pipeline(
     run = get_current_run_tree()
     if run is not None:
         run.extra.setdefault("metadata", {}).update({"tenant_id": tenant_id, "user_id": user_id})
+        yield "run_id", str(run.id)
 
     input_check = await run_in_threadpool(check_content, query, "INPUT")
     if input_check.intervened:
@@ -226,12 +237,16 @@ async def chat_query(
 
         collected_text: list[str] = []
         sources: list[SourceCitation] = []
+        run_id: str | None = None
         had_error = False
 
         async for kind, data in _run_rag_pipeline(
             payload.query, chat_history, tenant_id, kb_id, current_user.user_id, current_user.is_admin
         ):
-            if kind == "sources":
+            if kind == "run_id":
+                run_id = data
+                yield _sse({"type": "run_id", "run_id": run_id})
+            elif kind == "sources":
                 sources = data
                 yield _sse({"type": "sources", "sources": [s.model_dump() for s in sources]})
             elif kind == "token":
@@ -250,9 +265,24 @@ async def chat_query(
         answer_text = "".join(collected_text)
 
         await run_in_threadpool(append_message, conversation_id, "user", payload.query, [])
-        await run_in_threadpool(append_message, conversation_id, "assistant", answer_text, sources)
+        await run_in_threadpool(append_message, conversation_id, "assistant", answer_text, sources, run_id)
         await run_in_threadpool(touch_conversation, current_user.user_id, conversation_id)
 
         yield _sse({"type": "done"})
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@router.post("/feedback", response_model=MessageResponse, status_code=status.HTTP_200_OK)
+async def submit_answer_feedback(
+    payload: FeedbackRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> MessageResponse:
+    try:
+        await run_in_threadpool(
+            submit_feedback, current_user.tenant_id, payload.run_id, payload.is_positive, payload.comment
+        )
+    except FeedbackError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    return MessageResponse(message="Feedback recorded.")

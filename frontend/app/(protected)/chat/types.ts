@@ -22,4 +22,6 @@ export interface Message {
   sources?: Source[];
   isError?: boolean;
   upload?: UploadState;
+  runId?: string;
+  feedback?: "up" | "down";
 }
