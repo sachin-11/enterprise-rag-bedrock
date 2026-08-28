@@ -33,7 +33,7 @@ from app.services.bedrock_kb_service import (
     BedrockKBError,
     sync_knowledge_base,
 )
-from app.services.document_store import delete_document, save_document
+from app.services.document_store import delete_document, get_document, save_document
 from app.services.ingestion_service import DocumentNotFoundError, ingest_document
 
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -443,7 +443,22 @@ async def update_document_shares(
     response_model=IngestResponse,
     status_code=status.HTTP_200_OK,
 )
-async def ingest_document_endpoint(document_id: str) -> IngestResponse:
+async def ingest_document_endpoint(
+    document_id: str,
+    current_user: CurrentUser = Depends(require_admin),
+) -> IngestResponse:
+    # This endpoint had NO auth check at all until this fix — anyone, logged
+    # in or not, could trigger embedding calls (real cost) and an
+    # OpenSearch write for any document_id, with no tenant scoping either.
+    # Gated to require_admin (consistent with upload/delete/share) and the
+    # document's own tenant_id must match the caller's, so an admin still
+    # can't trigger ingestion of another tenant's document by guessing its id.
+    existing = get_document(document_id)
+    if existing is None or existing.tenant_id != current_user.tenant_id:
+        # Same detail/status for "doesn't exist" and "exists in another
+        # tenant" — a 403 would confirm the id is valid, just not yours.
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No document found with id '{document_id}'")
+
     try:
         # ingest_document blocks (S3 download, embedding calls, OpenSearch bulk write),
         # so it runs off the event loop.
