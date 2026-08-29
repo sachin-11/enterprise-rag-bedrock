@@ -25,6 +25,7 @@ export interface OrgMember {
   enabled: boolean;
   status: string;
   is_self: boolean;
+  is_admin: boolean;
   query_count: number;
   total_cost: number;
   avg_latency_s: number | null;
@@ -89,6 +90,20 @@ export async function unsuspendUser(sub: string): Promise<void> {
   const response = await apiFetch(`/admin/users/${sub}/unsuspend`, { method: "POST" });
   if (!response.ok) {
     throw new Error(await parseErrorMessage(response, `Failed to unsuspend user (${response.status}).`));
+  }
+}
+
+export async function promoteToAdmin(sub: string): Promise<void> {
+  const response = await apiFetch(`/admin/users/${sub}/promote`, { method: "POST" });
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response, `Failed to promote user (${response.status}).`));
+  }
+}
+
+export async function demoteFromAdmin(sub: string): Promise<void> {
+  const response = await apiFetch(`/admin/users/${sub}/demote`, { method: "POST" });
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response, `Failed to remove admin access (${response.status}).`));
   }
 }
 

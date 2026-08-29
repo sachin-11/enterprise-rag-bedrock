@@ -32,6 +32,7 @@ class OrgMemberRow(BaseModel):
     enabled: bool
     status: str
     is_self: bool
+    is_admin: bool
     query_count: int
     total_cost: float
     avg_latency_s: float | None = None

@@ -4,11 +4,13 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "../../context/AuthProvider";
 import {
+  demoteFromAdmin,
   generateInvite,
   getKnowledgeGaps,
   getOrgMembers,
   getOrgStats,
   getRecentErrors,
+  promoteToAdmin,
   retryFailedRun,
   suspendUser,
   unsuspendUser,
@@ -96,6 +98,28 @@ export default function AdminPage() {
       .then(() => {
         setMembers((prev) =>
           prev ? prev.map((m) => (m.sub === member.sub ? { ...m, enabled: !m.enabled } : m)) : prev,
+        );
+        setMemberRowStates((prev) => ({ ...prev, [member.sub]: "idle" }));
+      })
+      .catch((error: Error) => {
+        setMemberRowStates((prev) => ({ ...prev, [member.sub]: "error" }));
+        setMemberRowErrors((prev) => ({ ...prev, [member.sub]: error.message }));
+      });
+  };
+
+  const handleAdminToggle = (member: OrgMember) => {
+    setMemberRowStates((prev) => ({ ...prev, [member.sub]: "working" }));
+    setMemberRowErrors((prev) => {
+      const next = { ...prev };
+      delete next[member.sub];
+      return next;
+    });
+
+    const action = member.is_admin ? demoteFromAdmin : promoteToAdmin;
+    action(member.sub)
+      .then(() => {
+        setMembers((prev) =>
+          prev ? prev.map((m) => (m.sub === member.sub ? { ...m, is_admin: !m.is_admin } : m)) : prev,
         );
         setMemberRowStates((prev) => ({ ...prev, [member.sub]: "idle" }));
       })
@@ -427,6 +451,11 @@ export default function AdminPage() {
                             You
                           </span>
                         )}
+                        {member.is_admin && (
+                          <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-600">
+                            Admin
+                          </span>
+                        )}
                         {!member.enabled && (
                           <span className="rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-medium text-red-600">
                             Suspended
@@ -450,20 +479,30 @@ export default function AdminPage() {
                           <span className="h-3 w-3 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" />
                           Working…
                         </span>
-                      ) : member.enabled ? (
-                        <button
-                          onClick={() => handleSuspendToggle(member)}
-                          className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-700"
-                        >
-                          Suspend
-                        </button>
                       ) : (
-                        <button
-                          onClick={() => handleSuspendToggle(member)}
-                          className="rounded-md bg-gradient-to-br from-blue-600 to-indigo-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition-all hover:shadow-md"
-                        >
-                          Unsuspend
-                        </button>
+                        <>
+                          <button
+                            onClick={() => handleAdminToggle(member)}
+                            className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+                          >
+                            {member.is_admin ? "Remove admin" : "Make admin"}
+                          </button>
+                          {member.enabled ? (
+                            <button
+                              onClick={() => handleSuspendToggle(member)}
+                              className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-700"
+                            >
+                              Suspend
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleSuspendToggle(member)}
+                              className="rounded-md bg-gradient-to-br from-blue-600 to-indigo-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition-all hover:shadow-md"
+                            >
+                              Unsuspend
+                            </button>
+                          )}
+                        </>
                       )}
                     </div>
                   </li>

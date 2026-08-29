@@ -61,6 +61,7 @@ class OrgMember:
     email: str
     enabled: bool
     status: str
+    is_admin: bool = False
 
 
 def _secret_hash(username: str) -> str:
@@ -336,31 +337,53 @@ def verify_id_token(token: str) -> IdTokenClaims:
     return IdTokenClaims(user_id=claims["sub"], email=claims["email"], tenant_id=tenant_id, is_admin=is_admin)
 
 
-def list_org_members(tenant_id: str) -> list[OrgMember]:
+def _list_cognito_group_users(group_name: str) -> list[dict]:
+    """Raw Cognito user dicts for a group, paginated. Empty (not an error) if
+    the group doesn't exist yet — e.g. an org with no promoted admins beyond
+    its founder still has its "-admins" companion group, but a caller
+    shouldn't have to special-case a hypothetically-missing one.
+    """
     client = get_cognito_client()
-    members: list[OrgMember] = []
+    users: list[dict] = []
     next_token = None
     try:
         while True:
-            kwargs = {"UserPoolId": settings.cognito_user_pool_id, "GroupName": tenant_id}
+            kwargs = {"UserPoolId": settings.cognito_user_pool_id, "GroupName": group_name}
             if next_token:
                 kwargs["NextToken"] = next_token
             response = client.list_users_in_group(**kwargs)
-            for user in response.get("Users", []):
-                attrs = {a["Name"]: a["Value"] for a in user.get("Attributes", [])}
-                members.append(
-                    OrgMember(
-                        user_id=attrs.get("sub", ""),
-                        email=attrs.get("email", user.get("Username", "")),
-                        enabled=user.get("Enabled", True),
-                        status=user.get("UserStatus", ""),
-                    )
-                )
+            users.extend(response.get("Users", []))
             next_token = response.get("NextToken")
             if not next_token:
                 break
+    except client.exceptions.ResourceNotFoundException:
+        return []
     except (ClientError, BotoCoreError) as exc:
-        raise AuthError(f"Failed to list organization members: {exc}") from exc
+        raise AuthError(f"Failed to list members of group '{group_name}': {exc}") from exc
+    return users
+
+
+def list_org_members(tenant_id: str) -> list[OrgMember]:
+    admin_subs = {
+        attrs["sub"]
+        for user in _list_cognito_group_users(f"{tenant_id}{ADMIN_GROUP_SUFFIX}")
+        for attrs in [{a["Name"]: a["Value"] for a in user.get("Attributes", [])}]
+        if "sub" in attrs
+    }
+
+    members: list[OrgMember] = []
+    for user in _list_cognito_group_users(tenant_id):
+        attrs = {a["Name"]: a["Value"] for a in user.get("Attributes", [])}
+        sub = attrs.get("sub", "")
+        members.append(
+            OrgMember(
+                user_id=sub,
+                email=attrs.get("email", user.get("Username", "")),
+                enabled=user.get("Enabled", True),
+                status=user.get("UserStatus", ""),
+                is_admin=sub in admin_subs,
+            )
+        )
 
     return members
 
@@ -400,3 +423,54 @@ def unsuspend_user(tenant_id: str, target_sub: str) -> None:
         client.admin_enable_user(UserPoolId=settings.cognito_user_pool_id, Username=member.email)
     except (ClientError, BotoCoreError) as exc:
         raise AuthError(f"Failed to unsuspend user: {exc}") from exc
+
+
+def promote_to_admin(tenant_id: str, target_sub: str) -> None:
+    """Grants target_sub the f"{tenant_id}-admins" companion group — the
+    same mechanism that makes an org's founder its first admin (see
+    signup()), just applied to an existing member instead of at signup time.
+    """
+    member = _require_org_member(tenant_id, target_sub)
+
+    client = get_cognito_client()
+    admin_group = f"{tenant_id}{ADMIN_GROUP_SUFFIX}"
+    try:
+        client.create_group(
+            UserPoolId=settings.cognito_user_pool_id,
+            GroupName=admin_group,
+            Description=f"Admins of organization: {tenant_id}",
+        )
+    except client.exceptions.GroupExistsException:
+        pass  # expected — every org's admin-companion group already exists from its founder
+    except (ClientError, BotoCoreError) as exc:
+        raise AuthError(f"Failed to set up admin role for '{tenant_id}': {exc}") from exc
+
+    try:
+        client.admin_add_user_to_group(
+            UserPoolId=settings.cognito_user_pool_id, Username=member.email, GroupName=admin_group
+        )
+    except (ClientError, BotoCoreError) as exc:
+        raise AuthError(f"Failed to grant admin role: {exc}") from exc
+
+
+def demote_from_admin(tenant_id: str, target_sub: str, requesting_sub: str) -> None:
+    """Revokes target_sub's admin role. Self-demotion is blocked outright
+    (not just "if you're the last admin") — same simple, conservative shape
+    as suspend_user's self-suspend block: an admin who wants to step down
+    asks another admin to do it, rather than this needing to compute
+    "am I the last one" via a second group-membership query.
+    """
+    if target_sub == requesting_sub:
+        raise AuthError("You cannot remove your own admin access.")
+
+    member = _require_org_member(tenant_id, target_sub)
+
+    client = get_cognito_client()
+    try:
+        client.admin_remove_user_from_group(
+            UserPoolId=settings.cognito_user_pool_id,
+            Username=member.email,
+            GroupName=f"{tenant_id}{ADMIN_GROUP_SUFFIX}",
+        )
+    except (ClientError, BotoCoreError) as exc:
+        raise AuthError(f"Failed to remove admin role: {exc}") from exc
