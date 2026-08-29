@@ -36,6 +36,12 @@ export interface RetryResult {
   answer_preview: string | null;
 }
 
+export interface KnowledgeGapRow {
+  query: string;
+  occurrence_count: number;
+  last_asked: string;
+}
+
 async function parseErrorMessage(response: Response, fallback: string): Promise<string> {
   try {
     const body = await response.json();
@@ -98,6 +104,15 @@ export interface InviteResult {
   invite_url: string;
   email_sent: boolean;
   email_error: string | null;
+}
+
+export async function getKnowledgeGaps(days = 30, limit = 20): Promise<KnowledgeGapRow[]> {
+  const response = await apiFetch(`/admin/knowledge-gaps?days=${days}&limit=${limit}`);
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response, `Failed to load knowledge gaps (${response.status}).`));
+  }
+  const body = (await response.json()) as { gaps: KnowledgeGapRow[] };
+  return body.gaps;
 }
 
 export async function generateInvite(email: string): Promise<InviteResult> {

@@ -171,6 +171,13 @@ async def _run_rag_pipeline(
         SourceCitation(chunk_id=result.chunk_id, doc_name=result.doc_name, excerpt=_excerpt(result.text))
         for result in reranked
     ]
+    # Tags source_count so the admin dashboard's "knowledge gaps" panel
+    # (app/services/admin_service.py::get_knowledge_gaps) can find questions
+    # that got zero citations back — the objective, phrasing-independent
+    # signal for "the KB has nothing on this," as opposed to grepping the
+    # generated answer text for phrases like "does not contain information."
+    if run is not None:
+        run.extra.setdefault("metadata", {}).update({"source_count": len(sources)})
     yield "sources", sources
 
     context_block = _build_context_block(reranked)

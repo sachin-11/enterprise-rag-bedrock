@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "../../context/AuthProvider";
 import {
   generateInvite,
+  getKnowledgeGaps,
   getOrgMembers,
   getOrgStats,
   getRecentErrors,
@@ -13,12 +14,17 @@ import {
   unsuspendUser,
   type ErrorRow,
   type InviteResult,
+  type KnowledgeGapRow,
   type OrgMember,
   type OrgStats,
   type RetryResult,
 } from "../../lib/admin";
 
 const DAYS = 7;
+// Knowledge gaps benefit from a longer lookback than the rest of the
+// dashboard — a rare-but-important missing-doc question might not repeat
+// within just the last week.
+const KNOWLEDGE_GAPS_DAYS = 30;
 
 type MemberRowState = "idle" | "working" | "error";
 type RetryRowState = "idle" | "retrying" | "succeeded" | "failed";
@@ -38,6 +44,7 @@ export default function AdminPage() {
   const [stats, setStats] = useState<OrgStats | null>(null);
   const [errors, setErrors] = useState<ErrorRow[] | null>(null);
   const [members, setMembers] = useState<OrgMember[] | null>(null);
+  const [knowledgeGaps, setKnowledgeGaps] = useState<KnowledgeGapRow[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [memberRowStates, setMemberRowStates] = useState<Record<string, MemberRowState>>({});
@@ -57,11 +64,17 @@ export default function AdminPage() {
 
   const load = useCallback(() => {
     setLoadError(null);
-    Promise.all([getOrgStats(DAYS), getRecentErrors(20), getOrgMembers(DAYS)])
-      .then(([statsData, errorsData, membersData]) => {
+    Promise.all([
+      getOrgStats(DAYS),
+      getRecentErrors(20),
+      getOrgMembers(DAYS),
+      getKnowledgeGaps(KNOWLEDGE_GAPS_DAYS),
+    ])
+      .then(([statsData, errorsData, membersData, gapsData]) => {
         setStats(statsData);
         setErrors(errorsData);
         setMembers(membersData);
+        setKnowledgeGaps(gapsData);
       })
       .catch((error: Error) => setLoadError(error.message));
   }, []);
@@ -345,6 +358,45 @@ export default function AdminPage() {
                   </li>
                 );
               })}
+            </ul>
+          )}
+        </section>
+
+        {/* Knowledge gaps */}
+        <section className="mb-8">
+          <h2 className="mb-1 text-sm font-semibold text-gray-900">Knowledge gaps</h2>
+          <p className="mb-3 text-xs text-gray-500">
+            Questions from the last {KNOWLEDGE_GAPS_DAYS} days that got zero relevant documents back — the
+            strongest signal for what&apos;s missing from your knowledge base.
+          </p>
+
+          {knowledgeGaps === null && !loadError && (
+            <div className="space-y-2">
+              {[0, 1].map((i) => (
+                <div key={i} className="h-14 animate-pulse rounded-lg border border-gray-200 bg-gray-50" />
+              ))}
+            </div>
+          )}
+
+          {knowledgeGaps !== null && knowledgeGaps.length === 0 && (
+            <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center">
+              <p className="text-sm text-gray-500">No knowledge gaps in the last {KNOWLEDGE_GAPS_DAYS} days.</p>
+            </div>
+          )}
+
+          {knowledgeGaps !== null && knowledgeGaps.length > 0 && (
+            <ul className="divide-y divide-gray-200 rounded-lg border border-gray-200 bg-white shadow-sm">
+              {knowledgeGaps.map((gap, index) => (
+                <li key={`${gap.query}-${index}`} className="flex items-center justify-between gap-4 px-4 py-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-gray-900">{gap.query}</p>
+                    <p className="mt-0.5 text-xs text-gray-500">Last asked {new Date(gap.last_asked).toLocaleString()}</p>
+                  </div>
+                  <span className="shrink-0 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700">
+                    {gap.occurrence_count}×
+                  </span>
+                </li>
+              ))}
             </ul>
           )}
         </section>

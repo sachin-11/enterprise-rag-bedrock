@@ -4,7 +4,14 @@ from fastapi.concurrency import run_in_threadpool
 from app.api.chat import _run_rag_pipeline
 from app.core.config import settings
 from app.core.dependencies import require_admin
-from app.models.admin import ErrorsResponse, MembersResponse, OrgMemberRow, OrgStatsResponse, RetryResponse
+from app.models.admin import (
+    ErrorsResponse,
+    KnowledgeGapsResponse,
+    MembersResponse,
+    OrgMemberRow,
+    OrgStatsResponse,
+    RetryResponse,
+)
 from app.models.user import CurrentUser, GenerateInviteRequest, GenerateInviteResponse, MessageResponse
 from app.services import admin_service, auth_service, email_service, invite_service
 from app.services.admin_service import AdminError
@@ -23,6 +30,14 @@ async def get_stats(days: int = 7, current_user: CurrentUser = Depends(require_a
 async def get_errors(limit: int = 20, current_user: CurrentUser = Depends(require_admin)) -> ErrorsResponse:
     errors = await run_in_threadpool(admin_service.get_recent_errors, current_user.tenant_id, limit)
     return ErrorsResponse(errors=errors)
+
+
+@router.get("/knowledge-gaps", response_model=KnowledgeGapsResponse)
+async def get_knowledge_gaps(
+    days: int = 30, limit: int = 20, current_user: CurrentUser = Depends(require_admin)
+) -> KnowledgeGapsResponse:
+    gaps = await run_in_threadpool(admin_service.get_knowledge_gaps, current_user.tenant_id, days, limit)
+    return KnowledgeGapsResponse(gaps=gaps)
 
 
 @router.get("/users", response_model=MembersResponse)

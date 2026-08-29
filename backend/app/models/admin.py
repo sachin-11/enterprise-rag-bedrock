@@ -45,3 +45,13 @@ class RetryResponse(BaseModel):
     succeeded: bool
     error: str | None = None
     answer_preview: str | None = None
+
+
+class KnowledgeGapRow(BaseModel):
+    query: str
+    occurrence_count: int
+    last_asked: datetime
+
+
+class KnowledgeGapsResponse(BaseModel):
+    gaps: list[KnowledgeGapRow]

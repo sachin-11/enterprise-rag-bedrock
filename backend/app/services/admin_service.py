@@ -19,7 +19,7 @@ from itertools import islice
 from langsmith import Client
 
 from app.core.config import settings
-from app.models.admin import ErrorRow, OrgStatsResponse
+from app.models.admin import ErrorRow, KnowledgeGapRow, OrgStatsResponse
 from app.services.feedback_service import FEEDBACK_KEY
 
 PIPELINE_RUN_NAME = "chat_query_pipeline"
@@ -201,6 +201,61 @@ def get_user_breakdown(tenant_id: str, days: int = 7) -> dict[str, UserBreakdown
             stats.latencies_s.append((row.end_time - row.start_time).total_seconds())
 
     return breakdown
+
+
+def get_knowledge_gaps(tenant_id: str, days: int = 30, limit: int = 20) -> list[KnowledgeGapRow]:
+    """Questions that repeatedly got zero retrieved sources back — the
+    strongest signal an admin has for "what's missing from our docs."
+
+    Uses the source_count metadata tagged in chat.py's _run_rag_pipeline
+    right after reranking (0 = nothing relevant was found), not a text
+    match against the generated answer — that stays correct even if the
+    answer's exact wording changes. Same client-side-grouping constraint as
+    get_user_breakdown: the filter grammar only supports one
+    metadata_key/metadata_value pair per query, so this can't filter by
+    source_count server-side alongside the tenant filter.
+
+    Grouping is by exact (lowercased, stripped) query text — a real-world
+    limitation: "What's our refund policy?" and "refund policy?" count as
+    two different gaps rather than one. Good enough to point an admin at
+    the right area; not a semantic-similarity clustering pass.
+    """
+    client = _langsmith_client()
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+
+    rows = list(
+        islice(
+            client.list_runs(
+                project_name=settings.langsmith_project,
+                filter=_tenant_filter(tenant_id),
+                start_time=since,
+                select=["start_time", "extra", "inputs"],
+            ),
+            MAX_RUNS_PER_QUERY,
+        )
+    )
+
+    gaps: dict[str, dict] = {}
+    for row in rows:
+        metadata = (row.extra or {}).get("metadata", {}) or {}
+        if metadata.get("source_count") != 0:
+            continue  # not tagged (e.g. guardrail-blocked) or found something — not a gap
+
+        query_text = (row.inputs or {}).get("query", "").strip()
+        if not query_text:
+            continue
+
+        key = query_text.lower()
+        entry = gaps.setdefault(key, {"query": query_text, "count": 0, "last_asked": row.start_time})
+        entry["count"] += 1
+        if row.start_time is not None and (entry["last_asked"] is None or row.start_time > entry["last_asked"]):
+            entry["last_asked"] = row.start_time
+
+    ranked = sorted(gaps.values(), key=lambda entry: (entry["count"], entry["last_asked"]), reverse=True)
+    return [
+        KnowledgeGapRow(query=entry["query"], occurrence_count=entry["count"], last_asked=entry["last_asked"])
+        for entry in ranked[:limit]
+    ]
 
 
 def get_retry_inputs(tenant_id: str, run_id: str) -> dict:
