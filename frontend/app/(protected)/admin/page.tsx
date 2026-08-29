@@ -6,6 +6,7 @@ import { useAuth } from "../../context/AuthProvider";
 import {
   demoteFromAdmin,
   generateInvite,
+  getAuditLog,
   getKnowledgeGaps,
   getOrgMembers,
   getOrgStats,
@@ -14,6 +15,7 @@ import {
   retryFailedRun,
   suspendUser,
   unsuspendUser,
+  type AuditEventRow,
   type ErrorRow,
   type InviteResult,
   type KnowledgeGapRow,
@@ -27,6 +29,18 @@ const DAYS = 7;
 // dashboard — a rare-but-important missing-doc question might not repeat
 // within just the last week.
 const KNOWLEDGE_GAPS_DAYS = 30;
+const AUDIT_LOG_DAYS = 30;
+
+const AUDIT_ACTION_LABELS: Record<string, string> = {
+  document_uploaded: "uploaded a document",
+  document_deleted: "deleted a document",
+  document_shared: "updated document sharing",
+  user_suspended: "suspended a member",
+  user_unsuspended: "unsuspended a member",
+  user_promoted: "promoted a member to admin",
+  user_demoted: "removed a member's admin access",
+  invite_generated: "generated an invite",
+};
 
 type MemberRowState = "idle" | "working" | "error";
 type RetryRowState = "idle" | "retrying" | "succeeded" | "failed";
@@ -47,6 +61,7 @@ export default function AdminPage() {
   const [errors, setErrors] = useState<ErrorRow[] | null>(null);
   const [members, setMembers] = useState<OrgMember[] | null>(null);
   const [knowledgeGaps, setKnowledgeGaps] = useState<KnowledgeGapRow[] | null>(null);
+  const [auditLog, setAuditLog] = useState<AuditEventRow[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [memberRowStates, setMemberRowStates] = useState<Record<string, MemberRowState>>({});
@@ -71,12 +86,14 @@ export default function AdminPage() {
       getRecentErrors(20),
       getOrgMembers(DAYS),
       getKnowledgeGaps(KNOWLEDGE_GAPS_DAYS),
+      getAuditLog(AUDIT_LOG_DAYS),
     ])
-      .then(([statsData, errorsData, membersData, gapsData]) => {
+      .then(([statsData, errorsData, membersData, gapsData, auditData]) => {
         setStats(statsData);
         setErrors(errorsData);
         setMembers(membersData);
         setKnowledgeGaps(gapsData);
+        setAuditLog(auditData);
       })
       .catch((error: Error) => setLoadError(error.message));
   }, []);
@@ -508,6 +525,46 @@ export default function AdminPage() {
                   </li>
                 );
               })}
+            </ul>
+          )}
+        </section>
+
+        {/* Audit log */}
+        <section className="mt-8">
+          <h2 className="mb-1 text-sm font-semibold text-gray-900">Audit log</h2>
+          <p className="mb-3 text-xs text-gray-500">
+            Admin actions from the last {AUDIT_LOG_DAYS} days — who did what, and when.
+          </p>
+
+          {auditLog === null && !loadError && (
+            <div className="space-y-2">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="h-12 animate-pulse rounded-lg border border-gray-200 bg-gray-50" />
+              ))}
+            </div>
+          )}
+
+          {auditLog !== null && auditLog.length === 0 && (
+            <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center">
+              <p className="text-sm text-gray-500">No admin activity in the last {AUDIT_LOG_DAYS} days.</p>
+            </div>
+          )}
+
+          {auditLog !== null && auditLog.length > 0 && (
+            <ul className="divide-y divide-gray-200 rounded-lg border border-gray-200 bg-white shadow-sm">
+              {auditLog.map((event, index) => (
+                <li key={`${event.created_at}-${index}`} className="px-4 py-2.5">
+                  <p className="text-sm text-gray-900">
+                    <span className="font-medium">{event.actor_email}</span>{" "}
+                    {AUDIT_ACTION_LABELS[event.action] ?? event.action}
+                    {event.target && <span className="text-gray-600"> — {event.target}</span>}
+                  </p>
+                  <p className="mt-0.5 text-xs text-gray-500">
+                    {new Date(event.created_at).toLocaleString()}
+                    {event.details && ` · ${event.details}`}
+                  </p>
+                </li>
+              ))}
             </ul>
           )}
         </section>

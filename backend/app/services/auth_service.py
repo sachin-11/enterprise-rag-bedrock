@@ -402,7 +402,7 @@ def _require_org_member(tenant_id: str, target_sub: str) -> OrgMember:
     raise AuthError("User not found in this organization.")
 
 
-def suspend_user(tenant_id: str, target_sub: str, requesting_sub: str) -> None:
+def suspend_user(tenant_id: str, target_sub: str, requesting_sub: str) -> OrgMember:
     if target_sub == requesting_sub:
         raise AuthError("You cannot suspend your own account.")
 
@@ -414,8 +414,10 @@ def suspend_user(tenant_id: str, target_sub: str, requesting_sub: str) -> None:
     except (ClientError, BotoCoreError) as exc:
         raise AuthError(f"Failed to suspend user: {exc}") from exc
 
+    return member
 
-def unsuspend_user(tenant_id: str, target_sub: str) -> None:
+
+def unsuspend_user(tenant_id: str, target_sub: str) -> OrgMember:
     member = _require_org_member(tenant_id, target_sub)
 
     client = get_cognito_client()
@@ -424,8 +426,10 @@ def unsuspend_user(tenant_id: str, target_sub: str) -> None:
     except (ClientError, BotoCoreError) as exc:
         raise AuthError(f"Failed to unsuspend user: {exc}") from exc
 
+    return member
 
-def promote_to_admin(tenant_id: str, target_sub: str) -> None:
+
+def promote_to_admin(tenant_id: str, target_sub: str) -> OrgMember:
     """Grants target_sub the f"{tenant_id}-admins" companion group — the
     same mechanism that makes an org's founder its first admin (see
     signup()), just applied to an existing member instead of at signup time.
@@ -452,8 +456,10 @@ def promote_to_admin(tenant_id: str, target_sub: str) -> None:
     except (ClientError, BotoCoreError) as exc:
         raise AuthError(f"Failed to grant admin role: {exc}") from exc
 
+    return member
 
-def demote_from_admin(tenant_id: str, target_sub: str, requesting_sub: str) -> None:
+
+def demote_from_admin(tenant_id: str, target_sub: str, requesting_sub: str) -> OrgMember:
     """Revokes target_sub's admin role. Self-demotion is blocked outright
     (not just "if you're the last admin") — same simple, conservative shape
     as suspend_user's self-suspend block: an admin who wants to step down
@@ -474,3 +480,5 @@ def demote_from_admin(tenant_id: str, target_sub: str, requesting_sub: str) -> N
         )
     except (ClientError, BotoCoreError) as exc:
         raise AuthError(f"Failed to remove admin role: {exc}") from exc
+
+    return member

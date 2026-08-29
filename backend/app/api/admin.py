@@ -5,6 +5,7 @@ from app.api.chat import _run_rag_pipeline
 from app.core.config import settings
 from app.core.dependencies import require_admin
 from app.models.admin import (
+    AuditLogResponse,
     ErrorsResponse,
     KnowledgeGapsResponse,
     MembersResponse,
@@ -13,7 +14,7 @@ from app.models.admin import (
     RetryResponse,
 )
 from app.models.user import CurrentUser, GenerateInviteRequest, GenerateInviteResponse, MessageResponse
-from app.services import admin_service, auth_service, email_service, invite_service
+from app.services import admin_service, audit_service, auth_service, email_service, invite_service
 from app.services.admin_service import AdminError
 from app.services.auth_service import AuthError
 from app.services.email_service import EmailSendError
@@ -69,36 +70,72 @@ async def get_users(days: int = 7, current_user: CurrentUser = Depends(require_a
 @router.post("/users/{sub}/suspend", response_model=MessageResponse)
 async def suspend(sub: str, current_user: CurrentUser = Depends(require_admin)) -> MessageResponse:
     try:
-        await run_in_threadpool(auth_service.suspend_user, current_user.tenant_id, sub, current_user.user_id)
+        member = await run_in_threadpool(
+            auth_service.suspend_user, current_user.tenant_id, sub, current_user.user_id
+        )
     except AuthError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    await run_in_threadpool(
+        audit_service.log_event,
+        current_user.tenant_id,
+        current_user.user_id,
+        current_user.email,
+        audit_service.ACTION_USER_SUSPENDED,
+        member.email,
+    )
     return MessageResponse(message="User suspended.")
 
 
 @router.post("/users/{sub}/unsuspend", response_model=MessageResponse)
 async def unsuspend(sub: str, current_user: CurrentUser = Depends(require_admin)) -> MessageResponse:
     try:
-        await run_in_threadpool(auth_service.unsuspend_user, current_user.tenant_id, sub)
+        member = await run_in_threadpool(auth_service.unsuspend_user, current_user.tenant_id, sub)
     except AuthError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    await run_in_threadpool(
+        audit_service.log_event,
+        current_user.tenant_id,
+        current_user.user_id,
+        current_user.email,
+        audit_service.ACTION_USER_UNSUSPENDED,
+        member.email,
+    )
     return MessageResponse(message="User unsuspended.")
 
 
 @router.post("/users/{sub}/promote", response_model=MessageResponse)
 async def promote(sub: str, current_user: CurrentUser = Depends(require_admin)) -> MessageResponse:
     try:
-        await run_in_threadpool(auth_service.promote_to_admin, current_user.tenant_id, sub)
+        member = await run_in_threadpool(auth_service.promote_to_admin, current_user.tenant_id, sub)
     except AuthError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    await run_in_threadpool(
+        audit_service.log_event,
+        current_user.tenant_id,
+        current_user.user_id,
+        current_user.email,
+        audit_service.ACTION_USER_PROMOTED,
+        member.email,
+    )
     return MessageResponse(message="User promoted to admin.")
 
 
 @router.post("/users/{sub}/demote", response_model=MessageResponse)
 async def demote(sub: str, current_user: CurrentUser = Depends(require_admin)) -> MessageResponse:
     try:
-        await run_in_threadpool(auth_service.demote_from_admin, current_user.tenant_id, sub, current_user.user_id)
+        member = await run_in_threadpool(
+            auth_service.demote_from_admin, current_user.tenant_id, sub, current_user.user_id
+        )
     except AuthError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    await run_in_threadpool(
+        audit_service.log_event,
+        current_user.tenant_id,
+        current_user.user_id,
+        current_user.email,
+        audit_service.ACTION_USER_DEMOTED,
+        member.email,
+    )
     return MessageResponse(message="Admin access removed.")
 
 
@@ -117,9 +154,34 @@ async def create_invite(
         # Never a hard failure — the admin still has the link on-screen to
         # send manually (e.g. SES sandbox mode rejects unverified
         # recipients until production access is granted).
+        await run_in_threadpool(
+            audit_service.log_event,
+            current_user.tenant_id,
+            current_user.user_id,
+            current_user.email,
+            audit_service.ACTION_INVITE_GENERATED,
+            payload.email,
+            "email delivery failed",
+        )
         return GenerateInviteResponse(invite_url=invite_url, email_sent=False, email_error=str(exc))
 
+    await run_in_threadpool(
+        audit_service.log_event,
+        current_user.tenant_id,
+        current_user.user_id,
+        current_user.email,
+        audit_service.ACTION_INVITE_GENERATED,
+        payload.email,
+    )
     return GenerateInviteResponse(invite_url=invite_url, email_sent=True)
+
+
+@router.get("/audit-log", response_model=AuditLogResponse)
+async def get_audit_log(
+    days: int = 30, limit: int = 100, current_user: CurrentUser = Depends(require_admin)
+) -> AuditLogResponse:
+    events = await run_in_threadpool(audit_service.list_events, current_user.tenant_id, days, limit)
+    return AuditLogResponse(events=events)
 
 
 @router.post("/errors/{run_id}/retry", response_model=RetryResponse)

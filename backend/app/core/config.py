@@ -24,6 +24,7 @@ class Settings(BaseModel):
     cookie_secure: bool = os.getenv("COOKIE_SECURE", "true").lower() == "true"
     dynamodb_conversations_table: str = os.getenv("DYNAMODB_CONVERSATIONS_TABLE", "")
     dynamodb_messages_table: str = os.getenv("DYNAMODB_MESSAGES_TABLE", "")
+    audit_log_table: str = os.getenv("DYNAMODB_AUDIT_LOG_TABLE", "")
     # Reuses the same env vars LangChain's own tracing machinery already
     # reads directly from os.environ — the admin dashboard needs its own
     # read access to the same key to call the LangSmith API directly.

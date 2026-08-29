@@ -56,3 +56,15 @@ class KnowledgeGapRow(BaseModel):
 
 class KnowledgeGapsResponse(BaseModel):
     gaps: list[KnowledgeGapRow]
+
+
+class AuditEventRow(BaseModel):
+    actor_email: str
+    action: str
+    target: str | None = None
+    details: str | None = None
+    created_at: datetime
+
+
+class AuditLogResponse(BaseModel):
+    events: list[AuditEventRow]

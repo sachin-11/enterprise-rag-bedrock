@@ -43,6 +43,14 @@ export interface KnowledgeGapRow {
   last_asked: string;
 }
 
+export interface AuditEventRow {
+  actor_email: string;
+  action: string;
+  target: string | null;
+  details: string | null;
+  created_at: string;
+}
+
 async function parseErrorMessage(response: Response, fallback: string): Promise<string> {
   try {
     const body = await response.json();
@@ -128,6 +136,15 @@ export async function getKnowledgeGaps(days = 30, limit = 20): Promise<Knowledge
   }
   const body = (await response.json()) as { gaps: KnowledgeGapRow[] };
   return body.gaps;
+}
+
+export async function getAuditLog(days = 30, limit = 100): Promise<AuditEventRow[]> {
+  const response = await apiFetch(`/admin/audit-log?days=${days}&limit=${limit}`);
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response, `Failed to load audit log (${response.status}).`));
+  }
+  const body = (await response.json()) as { events: AuditEventRow[] };
+  return body.events;
 }
 
 export async function generateInvite(email: string): Promise<InviteResult> {

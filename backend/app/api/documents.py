@@ -25,7 +25,7 @@ from app.models.document import (
 )
 from app.models.kb_sync import SyncKBRequest, SyncKBResponse
 from app.models.user import CurrentUser
-from app.services import auth_service
+from app.services import audit_service, auth_service
 from app.services.bedrock_kb_service import (
     SHARED_WITH_METADATA_KEY,
     TENANT_ID_METADATA_KEY,
@@ -282,6 +282,15 @@ async def upload_document(
     )
     save_document(metadata)
 
+    await run_in_threadpool(
+        audit_service.log_event,
+        tenant_id,
+        current_user.user_id,
+        current_user.email,
+        audit_service.ACTION_DOCUMENT_UPLOADED,
+        file.filename,
+    )
+
     return DocumentUploadResponse(document_id=document_id, s3_key=s3_key, status=metadata.status)
 
 
@@ -364,6 +373,17 @@ async def delete_document_endpoint(
     # is keyed off this same in-memory store. A no-op if it was never there.
     delete_document(document_id)
 
+    primary_key = next((key for key in keys if not key.endswith(".metadata.json")), None)
+    parsed = _parse_document_id_and_filename(tenant_id, primary_key) if primary_key else None
+    await run_in_threadpool(
+        audit_service.log_event,
+        tenant_id,
+        current_user.user_id,
+        current_user.email,
+        audit_service.ACTION_DOCUMENT_DELETED,
+        parsed[1] if parsed else document_id,
+    )
+
     return DocumentDeleteResponse(document_id=document_id, deleted=True)
 
 
@@ -432,6 +452,17 @@ async def update_document_shares(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Failed to update document sharing: {exc}",
         ) from exc
+
+    parsed = _parse_document_id_and_filename(tenant_id, s3_key)
+    await run_in_threadpool(
+        audit_service.log_event,
+        tenant_id,
+        current_user.user_id,
+        current_user.email,
+        audit_service.ACTION_DOCUMENT_SHARED,
+        parsed[1] if parsed else document_id,
+        f"shared with {len(payload.user_ids)} member(s)",
+    )
 
     return DocumentSharingResponse(
         document_id=document_id, uploaded_by=sharing["uploaded_by"], shared_with=sharing["shared_with"]
