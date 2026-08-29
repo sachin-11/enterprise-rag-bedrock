@@ -23,9 +23,19 @@ from app.services.retrieval_service import rerank_with_cohere
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
-OPENAI_ANSWER_MODEL_ID = "gpt-5.5"
+## Latency/cost tuning (checked against a real OpenAI models list before
+# changing any of this): gpt-5.5 has no mini sibling, so "mini" here means
+# gpt-5.4-mini — the same model already used for rewrite_query/HyDE in
+# query_service.py, now also used for the final answer. Streaming
+# (llm.astream below) and connection pooling (@lru_cache on the client
+# factories, here and in query_service.py) were already in place from
+# earlier latency work this session — nothing to change there.
+OPENAI_ANSWER_MODEL_ID = "gpt-5.4-mini"
 RETRIEVE_TOP_K = 20
-RERANK_TOP_N = 5
+RERANK_TOP_N = 4
+# Bounds the answer's own generation time/cost — a RAG answer citing a
+# handful of excerpts has no legitimate reason to run past this.
+ANSWER_MAX_TOKENS = 1024
 EXCERPT_MAX_CHARS = 300
 TITLE_MAX_CHARS = 60
 
@@ -45,7 +55,12 @@ def _get_answer_llm() -> ChatOpenAI:
     # Cached so every request reuses the same HTTP client/connection pool
     # instead of paying a fresh TCP+TLS handshake each time — see the same
     # fix in query_service.py for the measured latency impact.
-    return ChatOpenAI(api_key=settings.openai_api_key, model=OPENAI_ANSWER_MODEL_ID, temperature=0.2)
+    return ChatOpenAI(
+        api_key=settings.openai_api_key,
+        model=OPENAI_ANSWER_MODEL_ID,
+        temperature=0.2,
+        max_tokens=ANSWER_MAX_TOKENS,
+    )
 
 
 def _build_context_block(sources: list[KBRetrievalResult]) -> str:
