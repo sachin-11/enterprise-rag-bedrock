@@ -7,16 +7,19 @@ from app.api.chat import router as chat_router
 from app.api.conversations import router as conversations_router
 from app.api.documents import router as documents_router
 from app.api.health import router as health_router
+from app.core.config import settings
 
 app = FastAPI(title="Enterprise RAG Bedrock API")
 
-# Local Next.js dev server runs on a different origin (port 3000/3001).
 # allow_credentials is required for the session cookies set by /auth/* to be
 # sent back on cross-origin requests — note this only works with an explicit
 # allow_origins list, never "*" (browsers reject wildcard + credentials).
+# The allow-list itself comes from settings.cors_allowed_origins (env-driven,
+# see app/core/config.py) so a deployed frontend's real origin can be added
+# without touching this file.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001"],
+    allow_origins=settings.cors_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

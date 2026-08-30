@@ -33,6 +33,18 @@ class Settings(BaseModel):
     invite_signing_key: str = os.getenv("INVITE_SIGNING_KEY", "")
     ses_sender_email: str = os.getenv("SES_SENDER_EMAIL", "")
     frontend_base_url: str = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000")
+    # CORS allow-list for app/main.py — comma-separated so a deployed
+    # frontend's real origin can be added via env var alone, no redeploy of
+    # this service needed. frontend_base_url is folded in automatically so
+    # it never has to be set twice.
+    cors_allowed_origins: list[str] = list(
+        {
+            *[o.strip() for o in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()],
+            "http://localhost:3000",
+            "http://localhost:3001",
+            os.getenv("FRONTEND_BASE_URL", "http://localhost:3000"),
+        }
+    )
     # Kill switch for app/services/error_watchdog_service.py — lets the
     # automatic retry-or-notify behavior be turned off via .env alone (e.g.
     # if it proves too costly/noisy in practice) without touching the
