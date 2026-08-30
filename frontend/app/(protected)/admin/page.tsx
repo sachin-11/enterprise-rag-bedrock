@@ -538,7 +538,7 @@ export default function AdminPage() {
         <section className="mb-8">
           <h2 className="mb-1 text-sm font-semibold text-gray-900">Error watchdog</h2>
           <p className="mb-3 text-xs text-gray-500">
-            Automatic activity from the last {AUDIT_LOG_DAYS} days — every time a real user's query failed, it
+            Automatic activity from the last {AUDIT_LOG_DAYS} days — every time a real user&apos;s query failed, it
             retried up to 3 times before giving up and emailing the admins. Individual events are in the audit log
             below.
           </p>
