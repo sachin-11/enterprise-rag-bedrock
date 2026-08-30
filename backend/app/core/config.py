@@ -33,6 +33,11 @@ class Settings(BaseModel):
     invite_signing_key: str = os.getenv("INVITE_SIGNING_KEY", "")
     ses_sender_email: str = os.getenv("SES_SENDER_EMAIL", "")
     frontend_base_url: str = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000")
+    # Kill switch for app/services/error_watchdog_service.py — lets the
+    # automatic retry-or-notify behavior be turned off via .env alone (e.g.
+    # if it proves too costly/noisy in practice) without touching the
+    # on-demand admin co-pilot, which is a separate code path.
+    error_watchdog_enabled: bool = os.getenv("ERROR_WATCHDOG_ENABLED", "true").lower() == "true"
 
 
 settings = Settings()

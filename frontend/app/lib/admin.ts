@@ -52,6 +52,16 @@ export interface AuditEventRow {
   target: string | null;
   details: string | null;
   created_at: string;
+  notified_count: number | null;
+}
+
+export interface WatchdogStats {
+  total_investigations: number;
+  succeeded_count: number;
+  exhausted_count: number;
+  skipped_count: number;
+  success_rate: number;
+  emails_sent_count: number;
 }
 
 async function parseErrorMessage(response: Response, fallback: string): Promise<string> {
@@ -141,6 +151,14 @@ export async function getKnowledgeGaps(days = 30, limit = 20): Promise<Knowledge
   return body.gaps;
 }
 
+export async function getWatchdogStats(days = 30): Promise<WatchdogStats> {
+  const response = await apiFetch(`/admin/watchdog-stats?days=${days}`);
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response, `Failed to load watchdog stats (${response.status}).`));
+  }
+  return (await response.json()) as WatchdogStats;
+}
+
 export async function getAuditLog(days = 30, limit = 100): Promise<AuditEventRow[]> {
   const response = await apiFetch(`/admin/audit-log?days=${days}&limit=${limit}`);
   if (!response.ok) {
@@ -148,6 +166,39 @@ export async function getAuditLog(days = 30, limit = 100): Promise<AuditEventRow
   }
   const body = (await response.json()) as { events: AuditEventRow[] };
   return body.events;
+}
+
+export interface CopilotMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface CopilotToolCall {
+  tool_name: string;
+  summary: string;
+}
+
+export interface CopilotAction {
+  action_type: "retry" | "email";
+  summary: string;
+}
+
+export interface CopilotResponse {
+  answer: string;
+  tool_calls: CopilotToolCall[];
+  actions_taken: CopilotAction[];
+}
+
+export async function runCopilot(message: string, history: CopilotMessage[]): Promise<CopilotResponse> {
+  const response = await apiFetch("/admin/copilot", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message, history }),
+  });
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response, `Failed to reach the co-pilot (${response.status}).`));
+  }
+  return (await response.json()) as CopilotResponse;
 }
 
 export async function generateInvite(email: string): Promise<InviteResult> {

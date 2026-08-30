@@ -67,7 +67,17 @@ class AuditEventRow(BaseModel):
     target: str | None = None
     details: str | None = None
     created_at: datetime
+    notified_count: int | None = None
 
 
 class AuditLogResponse(BaseModel):
     events: list[AuditEventRow]
+
+
+class WatchdogStatsResponse(BaseModel):
+    total_investigations: int
+    succeeded_count: int
+    exhausted_count: int
+    skipped_count: int
+    success_rate: float
+    emails_sent_count: int

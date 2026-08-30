@@ -11,17 +11,23 @@ import {
   getOrgMembers,
   getOrgStats,
   getRecentErrors,
+  getWatchdogStats,
   promoteToAdmin,
   retryFailedRun,
+  runCopilot,
   suspendUser,
   unsuspendUser,
   type AuditEventRow,
+  type CopilotAction,
+  type CopilotMessage,
+  type CopilotToolCall,
   type ErrorRow,
   type InviteResult,
   type KnowledgeGapRow,
   type OrgMember,
   type OrgStats,
   type RetryResult,
+  type WatchdogStats,
 } from "../../lib/admin";
 
 const DAYS = 7;
@@ -40,10 +46,20 @@ const AUDIT_ACTION_LABELS: Record<string, string> = {
   user_promoted: "promoted a member to admin",
   user_demoted: "removed a member's admin access",
   invite_generated: "generated an invite",
+  copilot_retry: "co-pilot retried a failed query",
+  copilot_notified: "co-pilot sent a notification email",
+  auto_retry_succeeded: "auto-watchdog retried a failed query and it now succeeds",
+  auto_retry_exhausted: "auto-watchdog retried a failed query, still failing, notified admins",
+  auto_investigation_skipped: "auto-watchdog skipped (another investigation ran recently)",
 };
 
 type MemberRowState = "idle" | "working" | "error";
 type RetryRowState = "idle" | "retrying" | "succeeded" | "failed";
+
+interface CopilotDisplayMessage extends CopilotMessage {
+  toolCalls?: CopilotToolCall[];
+  actionsTaken?: CopilotAction[];
+}
 
 function formatCost(value: number): string {
   return `$${value.toFixed(value < 1 ? 4 : 2)}`;
@@ -62,6 +78,7 @@ export default function AdminPage() {
   const [members, setMembers] = useState<OrgMember[] | null>(null);
   const [knowledgeGaps, setKnowledgeGaps] = useState<KnowledgeGapRow[] | null>(null);
   const [auditLog, setAuditLog] = useState<AuditEventRow[] | null>(null);
+  const [watchdogStats, setWatchdogStats] = useState<WatchdogStats | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [memberRowStates, setMemberRowStates] = useState<Record<string, MemberRowState>>({});
@@ -75,6 +92,11 @@ export default function AdminPage() {
   const [isSendingInvite, setIsSendingInvite] = useState(false);
   const [inviteCopied, setInviteCopied] = useState(false);
 
+  const [copilotMessages, setCopilotMessages] = useState<CopilotDisplayMessage[]>([]);
+  const [copilotInput, setCopilotInput] = useState("");
+  const [isCopilotLoading, setIsCopilotLoading] = useState(false);
+  const [copilotError, setCopilotError] = useState<string | null>(null);
+
   useEffect(() => {
     if (user && !user.is_admin) router.replace("/chat");
   }, [user, router]);
@@ -87,13 +109,15 @@ export default function AdminPage() {
       getOrgMembers(DAYS),
       getKnowledgeGaps(KNOWLEDGE_GAPS_DAYS),
       getAuditLog(AUDIT_LOG_DAYS),
+      getWatchdogStats(AUDIT_LOG_DAYS),
     ])
-      .then(([statsData, errorsData, membersData, gapsData, auditData]) => {
+      .then(([statsData, errorsData, membersData, gapsData, auditData, watchdogData]) => {
         setStats(statsData);
         setErrors(errorsData);
         setMembers(membersData);
         setKnowledgeGaps(gapsData);
         setAuditLog(auditData);
+        setWatchdogStats(watchdogData);
       })
       .catch((error: Error) => setLoadError(error.message));
   }, []);
@@ -191,6 +215,31 @@ export default function AdminPage() {
   const resetInvite = () => {
     setInviteResult(null);
     setInviteError(null);
+  };
+
+  const handleCopilotSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
+    const question = copilotInput.trim();
+    if (!question || isCopilotLoading) return;
+
+    const history: CopilotMessage[] = copilotMessages.map(({ role, content }) => ({ role, content }));
+    setCopilotMessages((prev) => [...prev, { role: "user", content: question }]);
+    setCopilotInput("");
+    setCopilotError(null);
+    setIsCopilotLoading(true);
+
+    runCopilot(question, history)
+      .then((result) => {
+        setCopilotMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: result.answer, toolCalls: result.tool_calls, actionsTaken: result.actions_taken },
+        ]);
+        setIsCopilotLoading(false);
+      })
+      .catch((error: Error) => {
+        setCopilotError(error.message);
+        setIsCopilotLoading(false);
+      });
   };
 
   if (!user?.is_admin) return null;
@@ -294,6 +343,80 @@ export default function AdminPage() {
           )}
 
           {inviteError && <p className="mt-2 text-xs text-red-600">{inviteError}</p>}
+        </section>
+
+        {/* Admin co-pilot */}
+        <section className="mb-8 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+          <h2 className="mb-1 text-sm font-semibold text-gray-900">Ask the co-pilot</h2>
+          <p className="mb-3 text-xs text-gray-500">
+            Ask about errors, knowledge gaps, or usage — it can pull the same data as the panels below, retry a
+            specific failing query, and email you if it finds something worth flagging. This conversation isn&apos;t
+            saved; it resets on reload.
+          </p>
+
+          {copilotMessages.length > 0 && (
+            <div className="mb-3 max-h-96 space-y-3 overflow-y-auto rounded-md border border-gray-100 bg-gray-50 p-3">
+              {copilotMessages.map((message, index) => (
+                <div key={index} className={message.role === "user" ? "text-right" : "text-left"}>
+                  <div
+                    className={
+                      message.role === "user"
+                        ? "inline-block max-w-[85%] rounded-lg bg-blue-600 px-3 py-2 text-left text-xs text-white"
+                        : "inline-block max-w-[85%] rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-800"
+                    }
+                  >
+                    <p className="whitespace-pre-wrap">{message.content}</p>
+                  </div>
+                  {message.role === "assistant" && (message.toolCalls?.length || message.actionsTaken?.length) ? (
+                    <div className="mt-1 space-y-1 text-left">
+                      {message.toolCalls && message.toolCalls.length > 0 && (
+                        <p className="text-[11px] text-gray-400">
+                          Checked: {message.toolCalls.map((t) => t.tool_name).join(", ")}
+                        </p>
+                      )}
+                      {message.actionsTaken?.map((action, actionIndex) => (
+                        <p
+                          key={actionIndex}
+                          className={
+                            action.action_type === "email"
+                              ? "text-[11px] font-medium text-amber-700"
+                              : "text-[11px] font-medium text-blue-700"
+                          }
+                        >
+                          {action.action_type === "email" ? "Sent email" : "Retried query"}: {action.summary}
+                        </p>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+              {isCopilotLoading && (
+                <div className="flex items-center gap-1.5 text-xs text-gray-500">
+                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" />
+                  Investigating…
+                </div>
+              )}
+            </div>
+          )}
+
+          <form onSubmit={handleCopilotSubmit} className="flex items-center gap-2">
+            <input
+              type="text"
+              placeholder="e.g. why did our error rate spike this week?"
+              value={copilotInput}
+              onChange={(event) => setCopilotInput(event.target.value)}
+              disabled={isCopilotLoading}
+              className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-xs text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-60"
+            />
+            <button
+              type="submit"
+              disabled={isCopilotLoading || !copilotInput.trim()}
+              className="shrink-0 rounded-md bg-gradient-to-br from-blue-600 to-indigo-600 px-4 py-2 text-xs font-medium text-white shadow-sm transition-all hover:shadow-md disabled:opacity-60"
+            >
+              Ask
+            </button>
+          </form>
+          {copilotError && <p className="mt-2 text-xs text-red-600">{copilotError}</p>}
         </section>
 
         {/* Stat cards */}
@@ -409,6 +532,42 @@ export default function AdminPage() {
               })}
             </ul>
           )}
+        </section>
+
+        {/* Error watchdog */}
+        <section className="mb-8">
+          <h2 className="mb-1 text-sm font-semibold text-gray-900">Error watchdog</h2>
+          <p className="mb-3 text-xs text-gray-500">
+            Automatic activity from the last {AUDIT_LOG_DAYS} days — every time a real user's query failed, it
+            retried up to 3 times before giving up and emailing the admins. Individual events are in the audit log
+            below.
+          </p>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            {[
+              { label: "Investigations", value: watchdogStats ? watchdogStats.total_investigations.toLocaleString() : null },
+              {
+                label: "Success rate",
+                value: watchdogStats
+                  ? watchdogStats.total_investigations === 0
+                    ? "—"
+                    : `${(watchdogStats.success_rate * 100).toFixed(0)}%`
+                  : null,
+              },
+              { label: "Auto-fixed", value: watchdogStats ? watchdogStats.succeeded_count.toLocaleString() : null },
+              { label: "Escalated", value: watchdogStats ? watchdogStats.exhausted_count.toLocaleString() : null },
+              { label: "Emails sent", value: watchdogStats ? watchdogStats.emails_sent_count.toLocaleString() : null },
+              { label: "Skipped (cooldown)", value: watchdogStats ? watchdogStats.skipped_count.toLocaleString() : null },
+            ].map((card) => (
+              <div key={card.label} className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+                <p className="text-xs font-medium uppercase tracking-wide text-gray-500">{card.label}</p>
+                {card.value === null ? (
+                  <div className="mt-2 h-6 w-16 animate-pulse rounded bg-gray-100" />
+                ) : (
+                  <p className="mt-1 text-xl font-semibold text-gray-900">{card.value}</p>
+                )}
+              </div>
+            ))}
+          </div>
         </section>
 
         {/* Knowledge gaps */}

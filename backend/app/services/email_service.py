@@ -52,3 +52,32 @@ def send_invite_email(to_email: str, org_slug: str, invite_url: str) -> None:
         raise EmailSendError(str(exc)) from exc
     except (ClientError, BotoCoreError) as exc:
         raise EmailSendError(f"Failed to send invite email: {exc}") from exc
+
+
+def send_admin_notification_email(to_email: str, subject: str, message: str) -> None:
+    """Sends a plain notification email — used by the admin co-pilot agent
+    (app/services/copilot_service.py) when it finds a specific, real issue
+    worth flagging. The recipient is always the calling admin's own email,
+    enforced by the caller, never a value this function or the LLM chooses.
+    """
+    client = get_ses_client()
+    html_body = f"<p>{message}</p>"
+
+    try:
+        client.send_email(
+            FromEmailAddress=settings.ses_sender_email,
+            Destination={"ToAddresses": [to_email]},
+            Content={
+                "Simple": {
+                    "Subject": {"Data": subject},
+                    "Body": {
+                        "Text": {"Data": message},
+                        "Html": {"Data": html_body},
+                    },
+                }
+            },
+        )
+    except client.exceptions.MessageRejected as exc:
+        raise EmailSendError(str(exc)) from exc
+    except (ClientError, BotoCoreError) as exc:
+        raise EmailSendError(f"Failed to send notification email: {exc}") from exc

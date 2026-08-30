@@ -19,7 +19,8 @@ from itertools import islice
 from langsmith import Client
 
 from app.core.config import settings
-from app.models.admin import ErrorRow, KnowledgeGapRow, OrgStatsResponse
+from app.models.admin import ErrorRow, KnowledgeGapRow, OrgStatsResponse, WatchdogStatsResponse
+from app.services import audit_service
 from app.services.feedback_service import FEEDBACK_KEY
 
 PIPELINE_RUN_NAME = "chat_query_pipeline"
@@ -310,3 +311,37 @@ def get_retry_inputs(tenant_id: str, run_id: str) -> dict:
 
     inputs = row.inputs or {}
     return {"query": inputs.get("query", ""), "chat_history": inputs.get("chat_history") or []}
+
+
+_WATCHDOG_ACTIONS = {
+    audit_service.ACTION_AUTO_RETRY_SUCCEEDED,
+    audit_service.ACTION_AUTO_RETRY_EXHAUSTED,
+    audit_service.ACTION_AUTO_INVESTIGATION_SKIPPED,
+}
+
+
+def get_watchdog_stats(tenant_id: str, days: int = 30) -> WatchdogStatsResponse:
+    """Aggregates app/services/error_watchdog_service.py's own audit-log
+    entries — how many times it ran, fixed things automatically, gave up
+    and escalated, or sat out a cooldown, and how many admins it actually
+    reached by email. Read from the audit log (not a separate counter)
+    since every investigation already writes exactly one entry there.
+    """
+    events = audit_service.list_events_for_actions(tenant_id, days, _WATCHDOG_ACTIONS)
+
+    succeeded_count = sum(1 for e in events if e.action == audit_service.ACTION_AUTO_RETRY_SUCCEEDED)
+    exhausted_count = sum(1 for e in events if e.action == audit_service.ACTION_AUTO_RETRY_EXHAUSTED)
+    skipped_count = sum(1 for e in events if e.action == audit_service.ACTION_AUTO_INVESTIGATION_SKIPPED)
+    emails_sent_count = sum(e.notified_count or 0 for e in events if e.action == audit_service.ACTION_AUTO_RETRY_EXHAUSTED)
+
+    total_investigations = succeeded_count + exhausted_count
+    success_rate = succeeded_count / total_investigations if total_investigations else 0.0
+
+    return WatchdogStatsResponse(
+        total_investigations=total_investigations,
+        succeeded_count=succeeded_count,
+        exhausted_count=exhausted_count,
+        skipped_count=skipped_count,
+        success_rate=success_rate,
+        emails_sent_count=emails_sent_count,
+    )

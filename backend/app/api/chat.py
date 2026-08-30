@@ -9,12 +9,13 @@ from fastapi.responses import StreamingResponse
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langsmith import get_current_run_tree, traceable
+from starlette.background import BackgroundTask
 
 from app.core.config import settings
 from app.core.dependencies import get_current_user
 from app.models.chat import ChatQueryRequest, FeedbackRequest, SourceCitation
 from app.models.user import CurrentUser, MessageResponse
-from app.services import cache_service
+from app.services import cache_service, error_watchdog_service
 from app.services.bedrock_kb_service import BedrockKBError, KBRetrievalResult, retrieve_from_kb
 from app.services.conversation_store import append_message, create_conversation, get_conversation, touch_conversation
 from app.services.feedback_service import FeedbackError, submit_feedback
@@ -251,6 +252,28 @@ async def _run_rag_pipeline(
         yield "error", f"Failed to generate answer: {exc}"
 
 
+async def run_pipeline_once(
+    query: str, chat_history: list[dict], tenant_id: str, kb_id: str, user_id: str, is_admin: bool
+) -> tuple[bool, str]:
+    """Consumes _run_rag_pipeline to completion instead of streaming it,
+    for callers that just need a final result: the dashboard's per-error
+    "retry" button (app/api/admin.py) and the admin co-pilot's
+    retry_failed_query tool (app/services/copilot_service.py). Both must
+    behave identically to a real query, so this reuses the exact same
+    pipeline function rather than a separate non-streaming code path.
+
+    Returns (succeeded, text) — text is the full answer on success, or the
+    error detail on failure.
+    """
+    collected_text: list[str] = []
+    async for kind, data in _run_rag_pipeline(query, chat_history, tenant_id, kb_id, user_id, is_admin):
+        if kind in ("token", "guardrail"):
+            collected_text.append(data)
+        elif kind == "error":
+            return False, data
+    return True, "".join(collected_text)
+
+
 def _sse(payload: dict) -> str:
     return f"data: {json.dumps(payload)}\n\n"
 
@@ -288,6 +311,11 @@ async def chat_query(
         conversation_id = created.conversation_id
         chat_history = []
 
+    # Populated during streaming, read afterward by _investigate_if_needed —
+    # a generator can't hand a value back to its caller directly, and this
+    # needs to survive past the response's own return.
+    watchdog_state = {"had_error": False, "error_detail": "", "run_id": None}
+
     async def event_stream() -> AsyncIterator[str]:
         yield _sse({"type": "conversation", "conversation_id": conversation_id})
 
@@ -301,6 +329,7 @@ async def chat_query(
         ):
             if kind == "run_id":
                 run_id = data
+                watchdog_state["run_id"] = data
                 yield _sse({"type": "run_id", "run_id": run_id})
             elif kind == "sources":
                 sources = data
@@ -313,6 +342,8 @@ async def chat_query(
                 yield _sse({"type": "token", "text": data})
             elif kind == "error":
                 had_error = True
+                watchdog_state["had_error"] = True
+                watchdog_state["error_detail"] = data
                 yield _sse({"type": "error", "detail": data})
 
         if had_error:
@@ -326,7 +357,26 @@ async def chat_query(
 
         yield _sse({"type": "done"})
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    async def _investigate_if_needed() -> None:
+        # Runs after the streaming response has fully closed (StreamingResponse's
+        # `background` contract) — adds zero latency to what the failing user
+        # sees. See app/services/error_watchdog_service.py for the retry-cap/
+        # cooldown/notify logic; this is only the trigger site.
+        if not settings.error_watchdog_enabled or not watchdog_state["had_error"] or not watchdog_state["run_id"]:
+            return
+        await error_watchdog_service.investigate_error(
+            tenant_id,
+            watchdog_state["run_id"],
+            payload.query,
+            chat_history,
+            current_user.user_id,
+            current_user.is_admin,
+            watchdog_state["error_detail"],
+        )
+
+    return StreamingResponse(
+        event_stream(), media_type="text/event-stream", background=BackgroundTask(_investigate_if_needed)
+    )
 
 
 @router.post("/feedback", response_model=MessageResponse, status_code=status.HTTP_200_OK)

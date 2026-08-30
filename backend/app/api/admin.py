@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.concurrency import run_in_threadpool
 
-from app.api.chat import _run_rag_pipeline
+from app.api.chat import run_pipeline_once
 from app.core.config import settings
 from app.core.dependencies import require_admin
 from app.models.admin import (
@@ -12,9 +12,11 @@ from app.models.admin import (
     OrgMemberRow,
     OrgStatsResponse,
     RetryResponse,
+    WatchdogStatsResponse,
 )
+from app.models.copilot import CopilotRequest, CopilotResponse
 from app.models.user import CurrentUser, GenerateInviteRequest, GenerateInviteResponse, MessageResponse
-from app.services import admin_service, audit_service, auth_service, email_service, invite_service
+from app.services import admin_service, audit_service, auth_service, copilot_service, email_service, invite_service
 from app.services.admin_service import AdminError
 from app.services.auth_service import AuthError
 from app.services.email_service import EmailSendError
@@ -25,6 +27,11 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 @router.get("/stats", response_model=OrgStatsResponse)
 async def get_stats(days: int = 7, current_user: CurrentUser = Depends(require_admin)) -> OrgStatsResponse:
     return await run_in_threadpool(admin_service.get_org_stats, current_user.tenant_id, days)
+
+
+@router.get("/watchdog-stats", response_model=WatchdogStatsResponse)
+async def get_watchdog_stats(days: int = 30, current_user: CurrentUser = Depends(require_admin)) -> WatchdogStatsResponse:
+    return await run_in_threadpool(admin_service.get_watchdog_stats, current_user.tenant_id, days)
 
 
 @router.get("/errors", response_model=ErrorsResponse)
@@ -202,21 +209,24 @@ async def retry(run_id: str, current_user: CurrentUser = Depends(require_admin))
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="BEDROCK_KB_ID is not configured."
         )
 
-    collected_text: list[str] = []
-    had_error = False
-    error_detail = ""
-
-    async for kind, data in _run_rag_pipeline(
+    succeeded, text = await run_pipeline_once(
         inputs["query"], inputs["chat_history"], current_user.tenant_id, kb_id, current_user.user_id, current_user.is_admin
-    ):
-        if kind in ("token", "guardrail"):
-            collected_text.append(data)
-        elif kind == "error":
-            had_error = True
-            error_detail = data
+    )
+    if not succeeded:
+        return RetryResponse(succeeded=False, error=text)
 
-    if had_error:
-        return RetryResponse(succeeded=False, error=error_detail)
+    return RetryResponse(succeeded=True, answer_preview=text[:300])
 
-    answer_text = "".join(collected_text)
-    return RetryResponse(succeeded=True, answer_preview=answer_text[:300])
+
+@router.post("/copilot", response_model=CopilotResponse)
+async def copilot(
+    request: CopilotRequest, current_user: CurrentUser = Depends(require_admin)
+) -> CopilotResponse:
+    """Tool-calling agent for diagnostic questions about this org. Stateless
+    — the caller resends the full conversation history each turn (see
+    copilot_service.py's module docstring / the "Admin co-pilot agent" plan
+    for why: no new persistence layer for a v1 on-demand feature).
+    """
+    return await copilot_service.run_copilot(
+        current_user.tenant_id, current_user.user_id, current_user.email, request.message, request.history
+    )
