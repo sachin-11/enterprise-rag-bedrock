@@ -24,6 +24,17 @@ ID_TOKEN_MAX_AGE_SECONDS = 60 * 60
 REFRESH_TOKEN_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
 
 
+# Browsers only send a SameSite=Lax cookie on a top-level navigation, never
+# on a cross-site fetch/XHR — fine for local dev (localhost:3000 -> :8000 is
+# cross-origin but same-site), but the frontend and backend sit on entirely
+# different registrable domains once deployed (e.g. a Vercel app calling a
+# Render API), which is genuinely cross-site. SameSite=None is required for
+# that, and the spec requires None to be paired with Secure — so this rides
+# on the same cookie_secure flag rather than being a second env var to keep
+# in sync with it.
+_COOKIE_SAMESITE = "none" if settings.cookie_secure else "lax"
+
+
 def _set_session_cookies(response: Response, *, id_token: str, refresh_token: str | None, username: str) -> None:
     response.set_cookie(
         ID_TOKEN_COOKIE,
@@ -31,7 +42,7 @@ def _set_session_cookies(response: Response, *, id_token: str, refresh_token: st
         max_age=ID_TOKEN_MAX_AGE_SECONDS,
         httponly=True,
         secure=settings.cookie_secure,
-        samesite="lax",
+        samesite=_COOKIE_SAMESITE,
     )
     if refresh_token is not None:
         response.set_cookie(
@@ -40,7 +51,7 @@ def _set_session_cookies(response: Response, *, id_token: str, refresh_token: st
             max_age=REFRESH_TOKEN_MAX_AGE_SECONDS,
             httponly=True,
             secure=settings.cookie_secure,
-            samesite="lax",
+            samesite=_COOKIE_SAMESITE,
         )
         # Needed to recompute SECRET_HASH on /auth/refresh and /auth/logout
         # without decoding a (possibly expired) JWT. This is the Cognito
@@ -51,7 +62,7 @@ def _set_session_cookies(response: Response, *, id_token: str, refresh_token: st
             max_age=REFRESH_TOKEN_MAX_AGE_SECONDS,
             httponly=True,
             secure=settings.cookie_secure,
-            samesite="lax",
+            samesite=_COOKIE_SAMESITE,
         )
 
 
