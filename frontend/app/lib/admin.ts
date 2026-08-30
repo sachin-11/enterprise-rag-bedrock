@@ -10,6 +10,9 @@ export interface OrgStats {
   p95_latency_s: number;
   feedback_count: number;
   feedback_positive_rate: number;
+  cache_hit_count: number;
+  cache_hit_rate: number;
+  estimated_cost_saved: number;
 }
 
 export interface ErrorRow {

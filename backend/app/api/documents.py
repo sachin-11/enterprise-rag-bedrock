@@ -25,7 +25,7 @@ from app.models.document import (
 )
 from app.models.kb_sync import SyncKBRequest, SyncKBResponse
 from app.models.user import CurrentUser
-from app.services import audit_service, auth_service
+from app.services import audit_service, auth_service, cache_service
 from app.services.bedrock_kb_service import (
     SHARED_WITH_METADATA_KEY,
     TENANT_ID_METADATA_KEY,
@@ -290,6 +290,9 @@ async def upload_document(
         audit_service.ACTION_DOCUMENT_UPLOADED,
         file.filename,
     )
+    # A new document changes what this tenant's retrieval can return — any
+    # cached answer computed before it existed could now be stale/incomplete.
+    cache_service.invalidate_tenant(tenant_id)
 
     return DocumentUploadResponse(document_id=document_id, s3_key=s3_key, status=metadata.status)
 
@@ -383,6 +386,7 @@ async def delete_document_endpoint(
         audit_service.ACTION_DOCUMENT_DELETED,
         parsed[1] if parsed else document_id,
     )
+    cache_service.invalidate_tenant(tenant_id)
 
     return DocumentDeleteResponse(document_id=document_id, deleted=True)
 
@@ -463,6 +467,7 @@ async def update_document_shares(
         parsed[1] if parsed else document_id,
         f"shared with {len(payload.user_ids)} member(s)",
     )
+    cache_service.invalidate_tenant(tenant_id)
 
     return DocumentSharingResponse(
         document_id=document_id, uploaded_by=sharing["uploaded_by"], shared_with=sharing["shared_with"]

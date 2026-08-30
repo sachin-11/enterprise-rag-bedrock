@@ -297,7 +297,7 @@ export default function AdminPage() {
         </section>
 
         {/* Stat cards */}
-        <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-5">
+        <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
           {[
             { label: "Queries", value: stats ? stats.query_count.toLocaleString() : null },
             { label: "Total cost", value: stats ? formatCost(stats.total_cost) : null },
@@ -310,6 +310,14 @@ export default function AdminPage() {
                   ? "No feedback yet"
                   : `${(stats.feedback_positive_rate * 100).toFixed(0)}% (${stats.feedback_count})`
                 : null,
+            },
+            {
+              label: "Cache hits",
+              value: stats ? `${stats.cache_hit_count.toLocaleString()} (${(stats.cache_hit_rate * 100).toFixed(0)}%)` : null,
+            },
+            {
+              label: "Cost saved by cache",
+              value: stats ? formatCost(stats.estimated_cost_saved) : null,
             },
           ].map((card) => (
             <div key={card.label} className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">

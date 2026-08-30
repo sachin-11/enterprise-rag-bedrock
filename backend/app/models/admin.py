@@ -13,6 +13,9 @@ class OrgStatsResponse(BaseModel):
     p95_latency_s: float
     feedback_count: int
     feedback_positive_rate: float
+    cache_hit_count: int
+    cache_hit_rate: float
+    estimated_cost_saved: float
 
 
 class ErrorRow(BaseModel):

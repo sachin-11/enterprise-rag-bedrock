@@ -101,6 +101,14 @@ def _mock_pipeline(monkeypatch):
     monkeypatch.setattr("app.api.chat.retrieve_from_kb", _fake_retrieve_from_kb)
     monkeypatch.setattr("app.api.chat.rerank_with_cohere", _fake_rerank)
 
+    # No real OpenAI embedding calls in tests, and every test deterministically
+    # exercises the full pipeline rather than depending on cache state left
+    # over from a previous test (cache_service's store is module-level and
+    # would otherwise persist across test functions within the same run).
+    monkeypatch.setattr("app.api.chat.embed_text", lambda text: [0.0] * 1536)
+    monkeypatch.setattr("app.services.cache_service.lookup", lambda *args, **kwargs: None)
+    monkeypatch.setattr("app.services.cache_service.store", lambda *args, **kwargs: None)
+
     mock_llm = MagicMock()
     mock_llm.astream.return_value = _FakeAstream("Revenue grew 12% year over year [1].")
     monkeypatch.setattr("app.api.chat._get_answer_llm", lambda: mock_llm)

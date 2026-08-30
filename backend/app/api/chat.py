@@ -14,12 +14,13 @@ from app.core.config import settings
 from app.core.dependencies import get_current_user
 from app.models.chat import ChatQueryRequest, FeedbackRequest, SourceCitation
 from app.models.user import CurrentUser, MessageResponse
+from app.services import cache_service
 from app.services.bedrock_kb_service import BedrockKBError, KBRetrievalResult, retrieve_from_kb
 from app.services.conversation_store import append_message, create_conversation, get_conversation, touch_conversation
 from app.services.feedback_service import FeedbackError, submit_feedback
 from app.services.guardrail_service import check_content
 from app.services.query_service import generate_hyde_passage, rewrite_query
-from app.services.retrieval_service import rerank_with_cohere
+from app.services.retrieval_service import embed_text, rerank_with_cohere
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -140,6 +141,14 @@ async def _run_rag_pipeline(
     check, so a post-hoc block would be pointless (or worse, misleading, if
     the persisted message differs from what the user already saw). The INPUT
     guardrail still runs before anything is generated.
+
+    Semantic cache: right after rewrite_query produces a standalone form of
+    the question, a cosine-similarity lookup (app/services/cache_service.py)
+    can short-circuit straight to a cached ("sources", ...) + ("token", ...)
+    pair, skipping HyDE/retrieve/rerank/generation entirely — the "token"
+    event on a cache hit carries the *whole* cached answer at once rather
+    than a real per-token stream, since there's no live generation to
+    stream from.
     """
     # Tags this trace with tenant_id/user_id so the admin dashboard
     # (app/services/admin_service.py) can filter LangSmith runs by
@@ -157,6 +166,23 @@ async def _run_rag_pipeline(
         return
 
     standalone_query = await run_in_threadpool(rewrite_query, query, chat_history)
+
+    # Semantic cache lookup. Scoped to (tenant_id, user_id, is_admin) — never
+    # shared across users in the same org, since retrieve_from_kb's own
+    # per-document sharing filter means two members can legitimately get
+    # different, both-correct answers to the identical question; sharing a
+    # cache entry across users would risk serving one of them an answer
+    # built from documents they can't actually see.
+    query_embedding = await run_in_threadpool(embed_text, standalone_query)
+    cached = cache_service.lookup(tenant_id, user_id, is_admin, query_embedding)
+    if run is not None:
+        run.extra.setdefault("metadata", {}).update({"cache_hit": cached is not None})
+    if cached is not None:
+        if run is not None:
+            run.extra.setdefault("metadata", {}).update({"source_count": len(cached.sources)})
+        yield "sources", cached.sources
+        yield "token", cached.answer_text
+        return
 
     hyde_passage = await run_in_threadpool(generate_hyde_passage, standalone_query)
     retrieval_query_text = hyde_passage or standalone_query
@@ -206,13 +232,21 @@ async def _run_rag_pipeline(
     )
 
     llm = _get_answer_llm()
+    generated_chunks: list[str] = []
     try:
         async for chunk in llm.astream([SystemMessage(content=_ANSWER_SYSTEM_PROMPT), HumanMessage(content=human_prompt)]):
             text = chunk.content
             if isinstance(text, list):
                 text = "".join(str(part) for part in text)
             if text:
+                generated_chunks.append(text)
                 yield "token", text
+        # Only reached if the whole stream completed without raising — a
+        # failed/partial generation must never be cached as if it were a
+        # real answer.
+        cache_service.store(
+            tenant_id, user_id, is_admin, standalone_query, query_embedding, "".join(generated_chunks), sources
+        )
     except openai.APIError as exc:
         yield "error", f"Failed to generate answer: {exc}"
 

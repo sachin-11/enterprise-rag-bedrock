@@ -112,7 +112,7 @@ def get_org_stats(tenant_id: str, days: int = 7) -> OrgStatsResponse:
                 project_name=settings.langsmith_project,
                 filter=_tenant_filter(tenant_id),
                 start_time=since,
-                select=["id", "start_time", "end_time", "total_cost", "status"],
+                select=["id", "start_time", "end_time", "total_cost", "status", "extra"],
             ),
             MAX_RUNS_PER_QUERY,
         )
@@ -129,6 +129,26 @@ def get_org_stats(tenant_id: str, days: int = 7) -> OrgStatsResponse:
     avg_latency_s, p50_latency_s, p95_latency_s = _latency_stats(latencies_s)
     feedback_count, feedback_positive_rate = _feedback_stats(client, [str(row.id) for row in rows])
 
+    # cache_hit is only tagged once _run_rag_pipeline reaches the lookup
+    # (i.e. not on a guardrail-blocked query, which returns before that
+    # point) — the denominator is runs that actually got a cache verdict,
+    # not every run in the window.
+    cache_rows = [row for row in rows if (row.extra or {}).get("metadata", {}).get("cache_hit") is not None]
+    cache_hits = [row for row in cache_rows if (row.extra or {}).get("metadata", {}).get("cache_hit")]
+    cache_misses = [row for row in cache_rows if not (row.extra or {}).get("metadata", {}).get("cache_hit")]
+
+    cache_hit_count = len(cache_hits)
+    cache_hit_rate = (cache_hit_count / len(cache_rows)) if cache_rows else 0.0
+
+    # A cache hit costs ~$0 (no LLM call) by construction — the number worth
+    # showing an admin is what those hits would have cost as real pipeline
+    # runs, estimated from what this org's own actual misses cost on
+    # average in the same window. 0 with no miss data yet to estimate from
+    # (rather than guessing), not because caching saved nothing.
+    miss_total_cost = sum(float(row.total_cost or 0) for row in cache_misses)
+    avg_miss_cost = (miss_total_cost / len(cache_misses)) if cache_misses else 0.0
+    estimated_cost_saved = avg_miss_cost * cache_hit_count
+
     return OrgStatsResponse(
         query_count=query_count,
         error_count=error_count,
@@ -139,6 +159,9 @@ def get_org_stats(tenant_id: str, days: int = 7) -> OrgStatsResponse:
         p95_latency_s=p95_latency_s,
         feedback_count=feedback_count,
         feedback_positive_rate=feedback_positive_rate,
+        cache_hit_count=cache_hit_count,
+        cache_hit_rate=cache_hit_rate,
+        estimated_cost_saved=estimated_cost_saved,
     )
 
 
