@@ -96,7 +96,7 @@ class _FakeAstream:
 
 @pytest.fixture(autouse=True)
 def _mock_pipeline(monkeypatch):
-    monkeypatch.setattr("app.api.chat.rewrite_query", lambda query, chat_history: query)
+    monkeypatch.setattr("app.api.chat.rewrite_query", lambda query, chat_history, history_summary="": query)
     monkeypatch.setattr("app.api.chat.generate_hyde_passage", lambda query: f"Hypothetical answer about {query}")
     monkeypatch.setattr("app.api.chat.retrieve_from_kb", _fake_retrieve_from_kb)
     monkeypatch.setattr("app.api.chat.rerank_with_cohere", _fake_rerank)
@@ -122,6 +122,8 @@ def _mock_pipeline(monkeypatch):
     )
     monkeypatch.setattr("app.api.chat.append_message", lambda *args, **kwargs: None)
     monkeypatch.setattr("app.api.chat.touch_conversation", lambda *args, **kwargs: None)
+    monkeypatch.setattr("app.api.chat.get_history_summary", lambda user_id, conversation_id: ("", 0))
+    monkeypatch.setattr("app.api.chat.update_history_summary", lambda *args, **kwargs: None)
 
     yield
     app.dependency_overrides.clear()

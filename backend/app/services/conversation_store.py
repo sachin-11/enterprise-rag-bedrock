@@ -140,6 +140,31 @@ def append_message(
     _messages_table().put_item(Item=item)
 
 
+def get_history_summary(user_id: str, conversation_id: str) -> tuple[str, int]:
+    """Returns (history_summary, summarized_through) for conversation_id, or
+    ("", 0) if the conversation has never been summarized yet.
+
+    summarized_through is a count of this conversation's messages (from the
+    start) already folded into history_summary — see
+    query_service.summarize_history and its call site in app/api/chat.py.
+    """
+    response = _conversations_table().get_item(
+        Key={"user_id": user_id, "conversation_id": conversation_id},
+        ProjectionExpression="history_summary, summarized_through",
+        ConsistentRead=True,
+    )
+    item = response.get("Item") or {}
+    return str(item.get("history_summary", "")), int(item.get("summarized_through", 0))
+
+
+def update_history_summary(user_id: str, conversation_id: str, history_summary: str, summarized_through: int) -> None:
+    _conversations_table().update_item(
+        Key={"user_id": user_id, "conversation_id": conversation_id},
+        UpdateExpression="SET history_summary = :s, summarized_through = :t",
+        ExpressionAttributeValues={":s": history_summary, ":t": summarized_through},
+    )
+
+
 def touch_conversation(user_id: str, conversation_id: str) -> None:
     """Bumps updated_at after a new message, so list_conversations sorts it to the top."""
     _conversations_table().update_item(

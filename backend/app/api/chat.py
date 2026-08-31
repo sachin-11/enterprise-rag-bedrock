@@ -17,10 +17,17 @@ from app.models.chat import ChatQueryRequest, FeedbackRequest, SourceCitation
 from app.models.user import CurrentUser, MessageResponse
 from app.services import cache_service, error_watchdog_service
 from app.services.bedrock_kb_service import BedrockKBError, KBRetrievalResult, retrieve_from_kb
-from app.services.conversation_store import append_message, create_conversation, get_conversation, touch_conversation
+from app.services.conversation_store import (
+    append_message,
+    create_conversation,
+    get_conversation,
+    get_history_summary,
+    touch_conversation,
+    update_history_summary,
+)
 from app.services.feedback_service import FeedbackError, submit_feedback
 from app.services.guardrail_service import check_content
-from app.services.query_service import generate_hyde_passage, rewrite_query
+from app.services.query_service import MAX_HISTORY_TURNS, generate_hyde_passage, rewrite_query, summarize_history
 from app.services.retrieval_service import embed_text, rerank_with_cohere
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -96,6 +103,7 @@ async def _run_rag_pipeline(
     kb_id: str,
     user_id: str,
     is_admin: bool,
+    history_summary: str = "",
 ) -> AsyncIterator[tuple[str, object]]:
     """The retrieval + generation pipeline, as one connected LangSmith trace.
 
@@ -143,6 +151,11 @@ async def _run_rag_pipeline(
     the persisted message differs from what the user already saw). The INPUT
     guardrail still runs before anything is generated.
 
+    history_summary: an LLM-maintained running summary of turns older than
+    rewrite_query's recent-turns window (see query_service.summarize_history
+    and its call site below, in chat_query), so a long conversation doesn't
+    simply lose everything before the last few turns.
+
     Semantic cache: right after rewrite_query produces a standalone form of
     the question, a cosine-similarity lookup (app/services/cache_service.py)
     can short-circuit straight to a cached ("sources", ...) + ("token", ...)
@@ -166,7 +179,7 @@ async def _run_rag_pipeline(
         yield "guardrail", input_check.output_text
         return
 
-    standalone_query = await run_in_threadpool(rewrite_query, query, chat_history)
+    standalone_query = await run_in_threadpool(rewrite_query, query, chat_history, history_summary)
 
     # Semantic cache lookup. Scoped to (tenant_id, user_id, is_admin) — never
     # shared across users in the same org, since retrieve_from_kb's own
@@ -304,12 +317,29 @@ async def chat_query(
             )
         conversation_id = conversation.conversation_id
         chat_history = [{"role": m.role, "content": m.content} for m in conversation.messages]
+
+        # Working memory: rewrite_query only sees the last MAX_HISTORY_TURNS
+        # turns verbatim (query_service._format_history) — anything older is
+        # preserved here as a running summary instead of being dropped
+        # outright. Only re-summarizes once enough new turns have aged out
+        # of that window since the last time this ran, not on every request.
+        history_summary, summarized_through = await run_in_threadpool(
+            get_history_summary, current_user.user_id, conversation_id
+        )
+        new_boundary = len(chat_history) - MAX_HISTORY_TURNS * 2
+        if new_boundary > summarized_through:
+            turns_to_fold = chat_history[summarized_through:new_boundary]
+            history_summary = await run_in_threadpool(summarize_history, history_summary, turns_to_fold)
+            await run_in_threadpool(
+                update_history_summary, current_user.user_id, conversation_id, history_summary, new_boundary
+            )
     else:
         created = await run_in_threadpool(
             create_conversation, current_user.user_id, tenant_id, _derive_title(payload.query)
         )
         conversation_id = created.conversation_id
         chat_history = []
+        history_summary = ""
 
     # Populated during streaming, read afterward by _investigate_if_needed —
     # a generator can't hand a value back to its caller directly, and this
@@ -325,7 +355,13 @@ async def chat_query(
         had_error = False
 
         async for kind, data in _run_rag_pipeline(
-            payload.query, chat_history, tenant_id, kb_id, current_user.user_id, current_user.is_admin
+            payload.query,
+            chat_history,
+            tenant_id,
+            kb_id,
+            current_user.user_id,
+            current_user.is_admin,
+            history_summary,
         ):
             if kind == "run_id":
                 run_id = data
