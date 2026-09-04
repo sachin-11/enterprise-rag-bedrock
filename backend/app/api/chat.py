@@ -1,4 +1,5 @@
 import json
+import logging
 from functools import lru_cache
 from typing import AsyncIterator
 
@@ -27,10 +28,13 @@ from app.services.conversation_store import (
 )
 from app.services.feedback_service import FeedbackError, submit_feedback
 from app.services.guardrail_service import check_content
+from app.services.injection_service import scan_for_injection
+from app.services.pii_service import redact_pii
 from app.services.query_service import MAX_HISTORY_TURNS, generate_hyde_passage, rewrite_query, summarize_history
 from app.services.retrieval_service import embed_text, rerank_with_cohere
 
 router = APIRouter(prefix="/chat", tags=["chat"])
+logger = logging.getLogger(__name__)
 
 ## Latency/cost tuning (checked against a real OpenAI models list before
 # changing any of this): gpt-5.5 has no mini sibling, so "mini" here means
@@ -42,6 +46,11 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 OPENAI_ANSWER_MODEL_ID = "gpt-5.4-mini"
 RETRIEVE_TOP_K = 20
 RERANK_TOP_N = 4
+# Cohere's relevance_score is 0-1. Below this, a chunk is noise relative to
+# the query — feeding it to the LLM anyway just adds prompt-injection surface
+# and irrelevant-context risk for no benefit. 0.2 is conservative (keeps
+# loosely-related chunks) rather than tuned against a labeled eval set.
+MIN_RELEVANCE_SCORE = 0.2
 # Bounds the answer's own generation time/cost — a RAG answer citing a
 # handful of excerpts has no legitimate reason to run past this.
 ANSWER_MAX_TOKENS = 1024
@@ -144,12 +153,13 @@ async def _run_rag_pipeline(
                                                 must translate this into an
                                                 in-band error event instead.
 
-    Known tradeoff: the OUTPUT guardrail check that used to run on the full
-    answer before returning it is skipped here — with streaming, tokens are
-    already on their way to the user by the time the full text exists to
-    check, so a post-hoc block would be pointless (or worse, misleading, if
-    the persisted message differs from what the user already saw). The INPUT
-    guardrail still runs before anything is generated.
+    Streaming tradeoff: generation is still streamed internally (astream), but
+    the "token" event for the answer is only yielded once, after the full
+    text is assembled and has passed the OUTPUT guardrail check — see the
+    comment at that call site. This trades true token-by-token delivery for
+    the guardrail actually being able to block a violation before the client
+    sees any of it. The INPUT guardrail still runs before anything is
+    generated, same as before.
 
     history_summary: an LLM-maintained running summary of turns older than
     rewrite_query's recent-turns window (see query_service.summarize_history
@@ -221,6 +231,10 @@ async def _run_rag_pipeline(
         return
 
     reranked = await run_in_threadpool(rerank_with_cohere, standalone_query, retrieved, RERANK_TOP_N)
+    # Drop anything the reranker itself scored as not actually relevant —
+    # see MIN_RELEVANCE_SCORE above. Applied after rerank, not before, since
+    # RETRIEVE_TOP_K's fused/KB score isn't comparable to Cohere's.
+    reranked = [result for result in reranked if result.score >= MIN_RELEVANCE_SCORE]
 
     sources = [
         SourceCitation(chunk_id=result.chunk_id, doc_name=result.doc_name, excerpt=_excerpt(result.text))
@@ -234,6 +248,19 @@ async def _run_rag_pipeline(
     if run is not None:
         run.extra.setdefault("metadata", {}).update({"source_count": len(sources)})
     yield "sources", sources
+
+    # Detection-only, not a filter — see injection_service.py's module
+    # docstring for why a flagged chunk still goes to the LLM. Logged for
+    # review, not acted on automatically.
+    flagged = [
+        (result.chunk_id, categories)
+        for result in reranked
+        if (categories := scan_for_injection(result.text))
+    ]
+    if flagged:
+        logger.warning("Possible prompt-injection pattern in retrieved chunk(s) (tenant=%s): %s", tenant_id, flagged)
+        if run is not None:
+            run.extra.setdefault("metadata", {}).update({"flagged_injection_chunks": flagged})
 
     context_block = _build_context_block(reranked)
     human_prompt = (
@@ -254,15 +281,37 @@ async def _run_rag_pipeline(
                 text = "".join(str(part) for part in text)
             if text:
                 generated_chunks.append(text)
-                yield "token", text
-        # Only reached if the whole stream completed without raising — a
-        # failed/partial generation must never be cached as if it were a
-        # real answer.
-        cache_service.store(
-            tenant_id, user_id, is_admin, standalone_query, query_embedding, "".join(generated_chunks), sources
-        )
     except openai.APIError as exc:
         yield "error", f"Failed to generate answer: {exc}"
+        return
+
+    # Buffered (not yielded token-by-token) specifically so the OUTPUT
+    # guardrail check below runs on the complete answer *before* any of it
+    # reaches the client — checking after streaming would be too late to stop
+    # a violation the user already saw. Costs perceived latency (client sees
+    # nothing until generation finishes) in exchange for the guardrail
+    # actually being able to block something.
+    answer_text = "".join(generated_chunks)
+    output_check = await run_in_threadpool(check_content, answer_text, "OUTPUT")
+    if output_check.intervened:
+        yield "token", output_check.output_text
+        return
+
+    # Last-resort net: catches credentials/secrets/govt-ID patterns that
+    # ended up quoted verbatim in a source document and echoed back in the
+    # answer — independent of whether a Bedrock Guardrail is configured
+    # above, since that's optional and fails open. See pii_service.py for
+    # why this only targets clearly-never-legitimate categories.
+    redaction = redact_pii(answer_text)
+    if redaction.redacted:
+        logger.warning("Redacted %s from an answer (tenant=%s)", redaction.categories_found, tenant_id)
+    answer_text = redaction.text
+
+    yield "token", answer_text
+    # Only reached if generation completed and the OUTPUT guardrail did not
+    # intervene — a failed, partial, or blocked answer must never be cached
+    # as if it were a real one.
+    cache_service.store(tenant_id, user_id, is_admin, standalone_query, query_embedding, answer_text, sources)
 
 
 async def run_pipeline_once(
