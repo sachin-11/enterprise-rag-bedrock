@@ -119,7 +119,11 @@ export default function AdminPage() {
 
   const load = useCallback(() => {
     setLoadError(null);
-    Promise.all([
+    // allSettled, not all: one panel's endpoint being unavailable (e.g. a
+    // backend deploy that's lagging behind the frontend) must not blank out
+    // every other panel that loaded fine — each setter below runs
+    // independently of whether its sibling calls succeeded.
+    Promise.allSettled([
       getOrgStats(DAYS),
       getRecentErrors(20),
       getOrgMembers(DAYS),
@@ -127,17 +131,22 @@ export default function AdminPage() {
       getAuditLog(AUDIT_LOG_DAYS),
       getWatchdogStats(AUDIT_LOG_DAYS),
       getEvalResults(),
-    ])
-      .then(([statsData, errorsData, membersData, gapsData, auditData, watchdogData, evalData]) => {
-        setStats(statsData);
-        setErrors(errorsData);
-        setMembers(membersData);
-        setKnowledgeGaps(gapsData);
-        setAuditLog(auditData);
-        setWatchdogStats(watchdogData);
-        setEvalResult(evalData);
-      })
-      .catch((error: Error) => setLoadError(error.message));
+    ]).then(([statsR, errorsR, membersR, gapsR, auditR, watchdogR, evalR]) => {
+      if (statsR.status === "fulfilled") setStats(statsR.value);
+      if (errorsR.status === "fulfilled") setErrors(errorsR.value);
+      if (membersR.status === "fulfilled") setMembers(membersR.value);
+      if (gapsR.status === "fulfilled") setKnowledgeGaps(gapsR.value);
+      if (auditR.status === "fulfilled") setAuditLog(auditR.value);
+      if (watchdogR.status === "fulfilled") setWatchdogStats(watchdogR.value);
+      if (evalR.status === "fulfilled") setEvalResult(evalR.value);
+
+      const failures = [statsR, errorsR, membersR, gapsR, auditR, watchdogR, evalR].filter(
+        (result): result is PromiseRejectedResult => result.status === "rejected",
+      );
+      if (failures.length > 0) {
+        setLoadError(failures.map((failure) => (failure.reason as Error).message).join(" · "));
+      }
+    });
   }, []);
 
   useEffect(() => {
@@ -272,7 +281,7 @@ export default function AdminPage() {
 
         {loadError && (
           <div className="mb-6 rounded-lg border border-red-200 bg-red-50 p-4">
-            <p className="text-sm font-medium text-red-800">Couldn&apos;t load dashboard data</p>
+            <p className="text-sm font-medium text-red-800">Some dashboard panels failed to load</p>
             <p className="mt-1 text-sm text-red-600">{loadError}</p>
             <button
               onClick={load}
