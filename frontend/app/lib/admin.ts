@@ -64,6 +64,31 @@ export interface WatchdogStats {
   emails_sent_count: number;
 }
 
+export interface EvalRunSummary {
+  run_id: string;
+  ran_at: string;
+  question_count: number;
+  avg_faithfulness: number;
+  avg_answer_relevancy: number;
+  avg_context_precision: number;
+  avg_context_recall: number;
+}
+
+export interface EvalQuestionRow {
+  question: string;
+  answer: string;
+  reference: string;
+  faithfulness: number;
+  answer_relevancy: number;
+  context_precision: number;
+  context_recall: number;
+}
+
+export interface EvalResult {
+  history: EvalRunSummary[];
+  latest_rows: EvalQuestionRow[];
+}
+
 async function parseErrorMessage(response: Response, fallback: string): Promise<string> {
   try {
     const body = await response.json();
@@ -157,6 +182,14 @@ export async function getWatchdogStats(days = 30): Promise<WatchdogStats> {
     throw new Error(await parseErrorMessage(response, `Failed to load watchdog stats (${response.status}).`));
   }
   return (await response.json()) as WatchdogStats;
+}
+
+export async function getEvalResults(): Promise<EvalResult> {
+  const response = await apiFetch("/admin/eval");
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response, `Failed to load eval results (${response.status}).`));
+  }
+  return (await response.json()) as EvalResult;
 }
 
 export async function getAuditLog(days = 30, limit = 100): Promise<AuditEventRow[]> {

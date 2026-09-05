@@ -7,6 +7,7 @@ from app.core.dependencies import require_admin
 from app.models.admin import (
     AuditLogResponse,
     ErrorsResponse,
+    EvalResponse,
     KnowledgeGapsResponse,
     MembersResponse,
     OrgMemberRow,
@@ -16,7 +17,15 @@ from app.models.admin import (
 )
 from app.models.copilot import CopilotRequest, CopilotResponse
 from app.models.user import CurrentUser, GenerateInviteRequest, GenerateInviteResponse, MessageResponse
-from app.services import admin_service, audit_service, auth_service, copilot_service, email_service, invite_service
+from app.services import (
+    admin_service,
+    audit_service,
+    auth_service,
+    copilot_service,
+    email_service,
+    eval_service,
+    invite_service,
+)
 from app.services.admin_service import AdminError
 from app.services.auth_service import AuthError
 from app.services.email_service import EmailSendError
@@ -181,6 +190,18 @@ async def create_invite(
         payload.email,
     )
     return GenerateInviteResponse(invite_url=invite_url, email_sent=True)
+
+
+@router.get("/eval", response_model=EvalResponse)
+async def get_eval(current_user: CurrentUser = Depends(require_admin)) -> EvalResponse:
+    """RAG-quality eval history from scripts/run_eval.py's saved runs.
+
+    Not tenant-scoped — see eval_service.py's module docstring for why — but
+    still admin-gated, same as every other panel here.
+    """
+    history = await run_in_threadpool(eval_service.get_eval_history)
+    latest_rows = await run_in_threadpool(eval_service.get_latest_eval_rows)
+    return EvalResponse(history=history, latest_rows=latest_rows)
 
 
 @router.get("/audit-log", response_model=AuditLogResponse)

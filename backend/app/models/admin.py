@@ -81,3 +81,31 @@ class WatchdogStatsResponse(BaseModel):
     skipped_count: int
     success_rate: float
     emails_sent_count: int
+
+
+class EvalRunSummary(BaseModel):
+    run_id: str
+    ran_at: datetime
+    question_count: int
+    avg_faithfulness: float
+    avg_answer_relevancy: float
+    avg_context_precision: float
+    avg_context_recall: float
+
+
+class EvalQuestionRow(BaseModel):
+    question: str
+    answer: str
+    reference: str
+    faithfulness: float
+    answer_relevancy: float
+    context_precision: float
+    context_recall: float
+
+
+class EvalResponse(BaseModel):
+    # Oldest -> newest, one entry per run of scripts/run_eval.py, for a
+    # quality-over-time trend. Empty until that script has been run at least
+    # once — this data isn't produced by live traffic.
+    history: list[EvalRunSummary]
+    latest_rows: list[EvalQuestionRow]

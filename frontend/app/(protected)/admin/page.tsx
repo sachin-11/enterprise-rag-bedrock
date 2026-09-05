@@ -7,6 +7,7 @@ import {
   demoteFromAdmin,
   generateInvite,
   getAuditLog,
+  getEvalResults,
   getKnowledgeGaps,
   getOrgMembers,
   getOrgStats,
@@ -22,6 +23,7 @@ import {
   type CopilotMessage,
   type CopilotToolCall,
   type ErrorRow,
+  type EvalResult,
   type InviteResult,
   type KnowledgeGapRow,
   type OrgMember,
@@ -69,6 +71,19 @@ function formatSeconds(value: number): string {
   return `${value.toFixed(2)}s`;
 }
 
+function formatScore(value: number): string {
+  return value.toFixed(2);
+}
+
+// Below this, a ragas score reads as a real quality problem rather than
+// ordinary judge-LLM noise — colors the eval table's cells so a regression
+// is visible at a glance instead of requiring someone to read every number.
+const EVAL_SCORE_WARN_THRESHOLD = 0.5;
+
+function evalScoreClass(value: number): string {
+  return value < EVAL_SCORE_WARN_THRESHOLD ? "font-medium text-red-600" : "text-gray-700";
+}
+
 export default function AdminPage() {
   const { user } = useAuth();
   const router = useRouter();
@@ -79,6 +94,7 @@ export default function AdminPage() {
   const [knowledgeGaps, setKnowledgeGaps] = useState<KnowledgeGapRow[] | null>(null);
   const [auditLog, setAuditLog] = useState<AuditEventRow[] | null>(null);
   const [watchdogStats, setWatchdogStats] = useState<WatchdogStats | null>(null);
+  const [evalResult, setEvalResult] = useState<EvalResult | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [memberRowStates, setMemberRowStates] = useState<Record<string, MemberRowState>>({});
@@ -110,14 +126,16 @@ export default function AdminPage() {
       getKnowledgeGaps(KNOWLEDGE_GAPS_DAYS),
       getAuditLog(AUDIT_LOG_DAYS),
       getWatchdogStats(AUDIT_LOG_DAYS),
+      getEvalResults(),
     ])
-      .then(([statsData, errorsData, membersData, gapsData, auditData, watchdogData]) => {
+      .then(([statsData, errorsData, membersData, gapsData, auditData, watchdogData, evalData]) => {
         setStats(statsData);
         setErrors(errorsData);
         setMembers(membersData);
         setKnowledgeGaps(gapsData);
         setAuditLog(auditData);
         setWatchdogStats(watchdogData);
+        setEvalResult(evalData);
       })
       .catch((error: Error) => setLoadError(error.message));
   }, []);
@@ -568,6 +586,116 @@ export default function AdminPage() {
               </div>
             ))}
           </div>
+        </section>
+
+        {/* RAG quality eval */}
+        <section className="mb-8">
+          <h2 className="mb-1 text-sm font-semibold text-gray-900">RAG quality eval</h2>
+          <p className="mb-3 text-xs text-gray-500">
+            Ragas scores from <code className="rounded bg-gray-100 px-1 py-0.5">scripts/run_eval.py</code> against
+            the fixed test set — not live traffic, so this only updates when someone runs the eval script.
+          </p>
+
+          {evalResult === null && !loadError && (
+            <div className="space-y-2">
+              {[0, 1].map((i) => (
+                <div key={i} className="h-14 animate-pulse rounded-lg border border-gray-200 bg-gray-50" />
+              ))}
+            </div>
+          )}
+
+          {evalResult !== null && evalResult.history.length === 0 && (
+            <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center">
+              <p className="text-sm text-gray-500">
+                No eval runs yet — run{" "}
+                <code className="rounded bg-gray-100 px-1 py-0.5">poetry run python scripts/run_eval.py</code> to
+                generate one.
+              </p>
+            </div>
+          )}
+
+          {evalResult !== null && evalResult.history.length > 0 && (
+            <>
+              {(() => {
+                const latestRun = evalResult.history[evalResult.history.length - 1];
+                return (
+                  <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    {[
+                      { label: "Faithfulness", value: latestRun.avg_faithfulness },
+                      { label: "Answer relevancy", value: latestRun.avg_answer_relevancy },
+                      { label: "Context precision", value: latestRun.avg_context_precision },
+                      { label: "Context recall", value: latestRun.avg_context_recall },
+                    ].map((card) => (
+                      <div key={card.label} className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+                        <p className="text-xs font-medium uppercase tracking-wide text-gray-500">{card.label}</p>
+                        <p className={`mt-1 text-xl font-semibold ${evalScoreClass(card.value)}`}>
+                          {formatScore(card.value)}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+
+              {evalResult.history.length > 1 && (
+                <div className="mb-4 overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
+                  <table className="w-full text-left text-xs">
+                    <thead className="border-b border-gray-200 text-gray-500">
+                      <tr>
+                        <th className="px-4 py-2 font-medium">Run</th>
+                        <th className="px-4 py-2 font-medium">Questions</th>
+                        <th className="px-4 py-2 font-medium">Faithfulness</th>
+                        <th className="px-4 py-2 font-medium">Answer relevancy</th>
+                        <th className="px-4 py-2 font-medium">Context precision</th>
+                        <th className="px-4 py-2 font-medium">Context recall</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {[...evalResult.history].reverse().map((run) => (
+                        <tr key={run.run_id}>
+                          <td className="px-4 py-2 text-gray-700">{new Date(run.ran_at).toLocaleString()}</td>
+                          <td className="px-4 py-2 text-gray-700">{run.question_count}</td>
+                          <td className={`px-4 py-2 ${evalScoreClass(run.avg_faithfulness)}`}>
+                            {formatScore(run.avg_faithfulness)}
+                          </td>
+                          <td className={`px-4 py-2 ${evalScoreClass(run.avg_answer_relevancy)}`}>
+                            {formatScore(run.avg_answer_relevancy)}
+                          </td>
+                          <td className={`px-4 py-2 ${evalScoreClass(run.avg_context_precision)}`}>
+                            {formatScore(run.avg_context_precision)}
+                          </td>
+                          <td className={`px-4 py-2 ${evalScoreClass(run.avg_context_recall)}`}>
+                            {formatScore(run.avg_context_recall)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              <p className="mb-2 text-xs font-medium text-gray-700">Latest run — per question</p>
+              <ul className="divide-y divide-gray-200 rounded-lg border border-gray-200 bg-white shadow-sm">
+                {evalResult.latest_rows.map((row, index) => (
+                  <li key={index} className="px-4 py-3">
+                    <p className="text-sm font-medium text-gray-900">{row.question}</p>
+                    <p className="mt-1 text-xs text-gray-600">{row.answer}</p>
+                    <p className="mt-1 text-xs text-gray-400">Reference: {row.reference}</p>
+                    <div className="mt-2 flex flex-wrap gap-3 text-[11px]">
+                      <span className={evalScoreClass(row.faithfulness)}>Faithfulness {formatScore(row.faithfulness)}</span>
+                      <span className={evalScoreClass(row.answer_relevancy)}>
+                        Relevancy {formatScore(row.answer_relevancy)}
+                      </span>
+                      <span className={evalScoreClass(row.context_precision)}>
+                        Precision {formatScore(row.context_precision)}
+                      </span>
+                      <span className={evalScoreClass(row.context_recall)}>Recall {formatScore(row.context_recall)}</span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
         </section>
 
         {/* Knowledge gaps */}
