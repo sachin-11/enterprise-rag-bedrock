@@ -97,6 +97,14 @@ export interface EvalResult {
   latest_rows: EvalQuestionRow[];
 }
 
+export interface FeedbackTrendPoint {
+  week_start: string;
+  week_end: string;
+  query_count: number;
+  feedback_count: number;
+  feedback_positive_rate: number;
+}
+
 async function parseErrorMessage(response: Response, fallback: string): Promise<string> {
   try {
     const body = await response.json();
@@ -190,6 +198,15 @@ export async function getWatchdogStats(days = 30): Promise<WatchdogStats> {
     throw new Error(await parseErrorMessage(response, `Failed to load watchdog stats (${response.status}).`));
   }
   return (await response.json()) as WatchdogStats;
+}
+
+export async function getFeedbackTrend(weeks = 8): Promise<FeedbackTrendPoint[]> {
+  const response = await apiFetch(`/admin/feedback-trend?weeks=${weeks}`);
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response, `Failed to load feedback trend (${response.status}).`));
+  }
+  const body = (await response.json()) as { points: FeedbackTrendPoint[] };
+  return body.points;
 }
 
 export async function getEvalResults(): Promise<EvalResult> {

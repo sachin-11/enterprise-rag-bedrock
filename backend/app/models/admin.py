@@ -111,6 +111,21 @@ class EvalQuestionRow(BaseModel):
     context_recall: float
 
 
+class FeedbackTrendPoint(BaseModel):
+    week_start: datetime
+    week_end: datetime
+    query_count: int
+    feedback_count: int
+    feedback_positive_rate: float
+
+
+class FeedbackTrendResponse(BaseModel):
+    # Oldest -> newest, one point per rolling 7-day window — lets an admin
+    # see a satisfaction drop against prior weeks instead of only ever
+    # seeing one window's aggregate rate with nothing to compare it to.
+    points: list[FeedbackTrendPoint]
+
+
 class EvalResponse(BaseModel):
     # Oldest -> newest, one entry per run of scripts/run_eval.py, for a
     # quality-over-time trend. Empty until that script has been run at least

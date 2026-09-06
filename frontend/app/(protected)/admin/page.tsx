@@ -8,6 +8,7 @@ import {
   generateInvite,
   getAuditLog,
   getEvalResults,
+  getFeedbackTrend,
   getKnowledgeGaps,
   getOrgMembers,
   getOrgStats,
@@ -24,6 +25,7 @@ import {
   type CopilotToolCall,
   type ErrorRow,
   type EvalResult,
+  type FeedbackTrendPoint,
   type InviteResult,
   type KnowledgeGapRow,
   type OrgMember,
@@ -84,6 +86,10 @@ function evalScoreClass(value: number): string {
   return value < EVAL_SCORE_WARN_THRESHOLD ? "font-medium text-red-600" : "text-gray-700";
 }
 
+// A week-over-week drop this large is the "satisfaction dropped 20%"
+// scenario, not normal week-to-week noise in a small feedback sample.
+const FEEDBACK_DROP_WARN_THRESHOLD = 0.15;
+
 export default function AdminPage() {
   const { user } = useAuth();
   const router = useRouter();
@@ -95,6 +101,7 @@ export default function AdminPage() {
   const [auditLog, setAuditLog] = useState<AuditEventRow[] | null>(null);
   const [watchdogStats, setWatchdogStats] = useState<WatchdogStats | null>(null);
   const [evalResult, setEvalResult] = useState<EvalResult | null>(null);
+  const [feedbackTrend, setFeedbackTrend] = useState<FeedbackTrendPoint[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [memberRowStates, setMemberRowStates] = useState<Record<string, MemberRowState>>({});
@@ -131,7 +138,8 @@ export default function AdminPage() {
       getAuditLog(AUDIT_LOG_DAYS),
       getWatchdogStats(AUDIT_LOG_DAYS),
       getEvalResults(),
-    ]).then(([statsR, errorsR, membersR, gapsR, auditR, watchdogR, evalR]) => {
+      getFeedbackTrend(),
+    ]).then(([statsR, errorsR, membersR, gapsR, auditR, watchdogR, evalR, feedbackTrendR]) => {
       if (statsR.status === "fulfilled") setStats(statsR.value);
       if (errorsR.status === "fulfilled") setErrors(errorsR.value);
       if (membersR.status === "fulfilled") setMembers(membersR.value);
@@ -139,8 +147,9 @@ export default function AdminPage() {
       if (auditR.status === "fulfilled") setAuditLog(auditR.value);
       if (watchdogR.status === "fulfilled") setWatchdogStats(watchdogR.value);
       if (evalR.status === "fulfilled") setEvalResult(evalR.value);
+      if (feedbackTrendR.status === "fulfilled") setFeedbackTrend(feedbackTrendR.value);
 
-      const failures = [statsR, errorsR, membersR, gapsR, auditR, watchdogR, evalR].filter(
+      const failures = [statsR, errorsR, membersR, gapsR, auditR, watchdogR, evalR, feedbackTrendR].filter(
         (result): result is PromiseRejectedResult => result.status === "rejected",
       );
       if (failures.length > 0) {
@@ -642,6 +651,66 @@ export default function AdminPage() {
               </div>
             ))}
           </div>
+        </section>
+
+        {/* Feedback trend */}
+        <section className="mb-8">
+          <h2 className="mb-1 text-sm font-semibold text-gray-900">Feedback trend</h2>
+          <p className="mb-3 text-xs text-gray-500">
+            Thumbs-up rate per week — a single window&apos;s aggregate rate can&apos;t show a drop against prior
+            weeks; this can. A red bar means it fell more than {(FEEDBACK_DROP_WARN_THRESHOLD * 100).toFixed(0)}{" "}
+            points versus the week before.
+          </p>
+
+          {feedbackTrend === null && !loadError && (
+            <div className="space-y-2">
+              {[0, 1].map((i) => (
+                <div key={i} className="h-6 animate-pulse rounded bg-gray-100" />
+              ))}
+            </div>
+          )}
+
+          {feedbackTrend !== null && feedbackTrend.every((point) => point.feedback_count === 0) && (
+            <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center">
+              <p className="text-sm text-gray-500">No feedback recorded in the last {feedbackTrend.length} weeks.</p>
+            </div>
+          )}
+
+          {feedbackTrend !== null && feedbackTrend.some((point) => point.feedback_count > 0) && (
+            <div className="space-y-2 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+              {feedbackTrend.map((point, index) => {
+                const previous = index > 0 ? feedbackTrend[index - 1] : null;
+                const dropped =
+                  previous !== null &&
+                  previous.feedback_count > 0 &&
+                  point.feedback_count > 0 &&
+                  previous.feedback_positive_rate - point.feedback_positive_rate >= FEEDBACK_DROP_WARN_THRESHOLD;
+                return (
+                  <div key={point.week_start} className="flex items-center gap-3">
+                    <span className="w-28 shrink-0 text-xs text-gray-600">
+                      {new Date(point.week_start).toLocaleDateString()}
+                    </span>
+                    <div className="h-4 flex-1 overflow-hidden rounded bg-gray-100">
+                      {point.feedback_count > 0 && (
+                        <div
+                          className={`h-full rounded ${dropped ? "bg-red-500" : "bg-green-500"}`}
+                          style={{ width: `${Math.max(point.feedback_positive_rate * 100, 2)}%` }}
+                        />
+                      )}
+                    </div>
+                    <span
+                      className={`w-36 shrink-0 text-right text-xs ${dropped ? "font-medium text-red-600" : "text-gray-500"}`}
+                    >
+                      {point.feedback_count === 0
+                        ? "No feedback"
+                        : `${(point.feedback_positive_rate * 100).toFixed(0)}% (${point.feedback_count})`}
+                      {dropped && " ↓"}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </section>
 
         {/* RAG quality eval */}

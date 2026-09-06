@@ -12,6 +12,7 @@ from __future__ import annotations
 import bisect
 import statistics
 import uuid
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
@@ -20,7 +21,14 @@ from itertools import islice
 from langsmith import Client
 
 from app.core.config import settings
-from app.models.admin import ErrorRow, KnowledgeGapRow, LatencyBucketRow, OrgStatsResponse, WatchdogStatsResponse
+from app.models.admin import (
+    ErrorRow,
+    FeedbackTrendPoint,
+    KnowledgeGapRow,
+    LatencyBucketRow,
+    OrgStatsResponse,
+    WatchdogStatsResponse,
+)
 from app.services import audit_service
 from app.services.feedback_service import FEEDBACK_KEY
 
@@ -193,6 +201,62 @@ def get_org_stats(tenant_id: str, days: int = 7) -> OrgStatsResponse:
         cache_hit_rate=cache_hit_rate,
         estimated_cost_saved=estimated_cost_saved,
     )
+
+
+def get_feedback_trend(tenant_id: str, weeks: int = 8) -> list[FeedbackTrendPoint]:
+    """Feedback-positive-rate bucketed into `weeks` rolling 7-day windows,
+    oldest first, ending now.
+
+    get_org_stats() only ever computes one window's aggregate rate — on its
+    own that can't answer "did satisfaction actually drop versus last week",
+    since there's nothing in that single number to compare against. This
+    buckets the same underlying LangSmith runs by week instead, so a drop
+    (e.g. investigating a regression after shipping a change) is visible
+    directly as a trend rather than requiring someone to have written down
+    last week's number themselves.
+    """
+    client = _langsmith_client()
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(weeks=weeks)
+
+    rows = list(
+        islice(
+            client.list_runs(
+                project_name=settings.langsmith_project,
+                filter=_tenant_filter(tenant_id),
+                start_time=since,
+                select=["id", "start_time"],
+            ),
+            MAX_RUNS_PER_QUERY,
+        )
+    )
+
+    # Bucketed by "how many whole 7-day periods before now", not calendar
+    # weeks — consistent with how every other lookback here (`days`) is
+    # already a rolling window ending now, not calendar-aligned.
+    buckets: dict[int, list[str]] = defaultdict(list)
+    for row in rows:
+        if row.start_time is None:
+            continue
+        week_index = min((now - row.start_time).days // 7, weeks - 1)
+        buckets[week_index].append(str(row.id))
+
+    points = []
+    for week_index in range(weeks - 1, -1, -1):
+        run_ids = buckets.get(week_index, [])
+        feedback_count, positive_rate = _feedback_stats(client, run_ids) if run_ids else (0, 0.0)
+        week_end = now - timedelta(days=7 * week_index)
+        week_start = week_end - timedelta(days=7)
+        points.append(
+            FeedbackTrendPoint(
+                week_start=week_start,
+                week_end=week_end,
+                query_count=len(run_ids),
+                feedback_count=feedback_count,
+                feedback_positive_rate=positive_rate,
+            )
+        )
+    return points
 
 
 def get_recent_errors(tenant_id: str, limit: int = 20) -> list[ErrorRow]:

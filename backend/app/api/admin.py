@@ -8,6 +8,7 @@ from app.models.admin import (
     AuditLogResponse,
     ErrorsResponse,
     EvalResponse,
+    FeedbackTrendResponse,
     KnowledgeGapsResponse,
     MembersResponse,
     OrgMemberRow,
@@ -36,6 +37,12 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 @router.get("/stats", response_model=OrgStatsResponse)
 async def get_stats(days: int = 7, current_user: CurrentUser = Depends(require_admin)) -> OrgStatsResponse:
     return await run_in_threadpool(admin_service.get_org_stats, current_user.tenant_id, days)
+
+
+@router.get("/feedback-trend", response_model=FeedbackTrendResponse)
+async def get_feedback_trend(weeks: int = 8, current_user: CurrentUser = Depends(require_admin)) -> FeedbackTrendResponse:
+    points = await run_in_threadpool(admin_service.get_feedback_trend, current_user.tenant_id, weeks)
+    return FeedbackTrendResponse(points=points)
 
 
 @router.get("/watchdog-stats", response_model=WatchdogStatsResponse)
