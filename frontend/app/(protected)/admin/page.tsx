@@ -65,15 +65,23 @@ interface CopilotDisplayMessage extends CopilotMessage {
   actionsTaken?: CopilotAction[];
 }
 
-function formatCost(value: number): string {
+// Guards against a field the frontend expects being absent from the
+// response — e.g. the backend and frontend deploy independently (Railway +
+// Vercel here), so there's a window where an older backend hasn't shipped a
+// field a newer frontend already reads. Rendering "—" beats crashing the
+// whole page on a bare `undefined.toFixed()`.
+function formatCost(value: number | null | undefined): string {
+  if (typeof value !== "number" || Number.isNaN(value)) return "—";
   return `$${value.toFixed(value < 1 ? 4 : 2)}`;
 }
 
-function formatSeconds(value: number): string {
+function formatSeconds(value: number | null | undefined): string {
+  if (typeof value !== "number" || Number.isNaN(value)) return "—";
   return `${value.toFixed(2)}s`;
 }
 
-function formatScore(value: number): string {
+function formatScore(value: number | null | undefined): string {
+  if (typeof value !== "number" || Number.isNaN(value)) return "—";
   return value.toFixed(2);
 }
 
@@ -511,13 +519,17 @@ export default function AdminPage() {
             </div>
           )}
 
-          {stats !== null && stats.query_count === 0 && (
+          {stats !== null && (stats.query_count === 0 || !stats.latency_histogram?.length) && (
             <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center">
-              <p className="text-sm text-gray-500">No queries in the last {DAYS} days.</p>
+              <p className="text-sm text-gray-500">
+                {stats.query_count === 0
+                  ? `No queries in the last ${DAYS} days.`
+                  : "Latency distribution isn't available yet — this needs the latest backend deployed."}
+              </p>
             </div>
           )}
 
-          {stats !== null && stats.query_count > 0 && (
+          {stats !== null && stats.query_count > 0 && !!stats.latency_histogram?.length && (
             <div className="space-y-2 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
               {stats.latency_histogram.map((bucket) => (
                 <div key={bucket.label} className="flex items-center gap-3">
