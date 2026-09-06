@@ -3,6 +3,12 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 
+class LatencyBucketRow(BaseModel):
+    label: str
+    count: int
+    percentage: float
+
+
 class OrgStatsResponse(BaseModel):
     query_count: int
     error_count: int
@@ -11,6 +17,8 @@ class OrgStatsResponse(BaseModel):
     avg_latency_s: float
     p50_latency_s: float
     p95_latency_s: float
+    p99_latency_s: float
+    latency_histogram: list[LatencyBucketRow]
     feedback_count: int
     feedback_positive_rate: float
     cache_hit_count: int

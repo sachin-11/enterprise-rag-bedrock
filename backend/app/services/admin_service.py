@@ -9,6 +9,7 @@ Cognito operations, not LangSmith ones — this module doesn't duplicate them.
 
 from __future__ import annotations
 
+import bisect
 import statistics
 import uuid
 from dataclasses import dataclass, field
@@ -19,7 +20,7 @@ from itertools import islice
 from langsmith import Client
 
 from app.core.config import settings
-from app.models.admin import ErrorRow, KnowledgeGapRow, OrgStatsResponse, WatchdogStatsResponse
+from app.models.admin import ErrorRow, KnowledgeGapRow, LatencyBucketRow, OrgStatsResponse, WatchdogStatsResponse
 from app.services import audit_service
 from app.services.feedback_service import FEEDBACK_KEY
 
@@ -66,18 +67,43 @@ def _tenant_filter(tenant_id: str) -> str:
     )
 
 
-def _latency_stats(latencies_s: list[float]) -> tuple[float, float, float]:
-    """Returns (avg, p50, p95). All zero if there's no latency data yet."""
+def _latency_stats(latencies_s: list[float]) -> tuple[float, float, float, float]:
+    """Returns (avg, p50, p95, p99). All zero if there's no latency data yet."""
     if not latencies_s:
-        return 0.0, 0.0, 0.0
+        return 0.0, 0.0, 0.0, 0.0
     if len(latencies_s) == 1:
         only = latencies_s[0]
-        return only, only, only
+        return only, only, only, only
 
     avg = statistics.mean(latencies_s)
     p50 = statistics.median(latencies_s)
-    p95 = statistics.quantiles(latencies_s, n=100)[94]
-    return avg, p50, p95
+    quantiles_100 = statistics.quantiles(latencies_s, n=100)
+    p95 = quantiles_100[94]
+    p99 = quantiles_100[98]
+    return avg, p50, p95, p99
+
+
+# Upper edge (seconds) of each bucket but the last, which catches everything
+# above LATENCY_BUCKET_EDGES_S[-1]. Picked around a "fast/ok/slow/very slow"
+# split for a streamed RAG answer rather than generic round numbers — a
+# real deployment with different latency characteristics should retune these.
+LATENCY_BUCKET_EDGES_S = [0.3, 0.8, 2.0, 5.0]
+LATENCY_BUCKET_LABELS = ["<300ms", "300ms–800ms", "800ms–2s", "2s–5s", ">5s"]
+
+
+def _latency_histogram(latencies_s: list[float]) -> list[LatencyBucketRow]:
+    """How many queries fell into each latency bucket — the answer to "how
+    many users waited how long", which a single percentile number can't show
+    (e.g. a fine p50/p95 can still hide a small but real slow tail)."""
+    counts = [0] * len(LATENCY_BUCKET_LABELS)
+    for value in latencies_s:
+        counts[bisect.bisect_right(LATENCY_BUCKET_EDGES_S, value)] += 1
+
+    total = len(latencies_s)
+    return [
+        LatencyBucketRow(label=label, count=count, percentage=(count / total) if total else 0.0)
+        for label, count in zip(LATENCY_BUCKET_LABELS, counts)
+    ]
 
 
 def _feedback_stats(client: Client, run_ids: list[str]) -> tuple[int, float]:
@@ -127,7 +153,8 @@ def get_org_stats(tenant_id: str, days: int = 7) -> OrgStatsResponse:
         for row in rows
         if row.start_time is not None and row.end_time is not None
     ]
-    avg_latency_s, p50_latency_s, p95_latency_s = _latency_stats(latencies_s)
+    avg_latency_s, p50_latency_s, p95_latency_s, p99_latency_s = _latency_stats(latencies_s)
+    latency_histogram = _latency_histogram(latencies_s)
     feedback_count, feedback_positive_rate = _feedback_stats(client, [str(row.id) for row in rows])
 
     # cache_hit is only tagged once _run_rag_pipeline reaches the lookup
@@ -158,6 +185,8 @@ def get_org_stats(tenant_id: str, days: int = 7) -> OrgStatsResponse:
         avg_latency_s=avg_latency_s,
         p50_latency_s=p50_latency_s,
         p95_latency_s=p95_latency_s,
+        p99_latency_s=p99_latency_s,
+        latency_histogram=latency_histogram,
         feedback_count=feedback_count,
         feedback_positive_rate=feedback_positive_rate,
         cache_hit_count=cache_hit_count,

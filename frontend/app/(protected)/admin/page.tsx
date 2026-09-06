@@ -451,7 +451,12 @@ export default function AdminPage() {
           {[
             { label: "Queries", value: stats ? stats.query_count.toLocaleString() : null },
             { label: "Total cost", value: stats ? formatCost(stats.total_cost) : null },
-            { label: "Avg / p95 latency", value: stats ? `${formatSeconds(stats.avg_latency_s)} / ${formatSeconds(stats.p95_latency_s)}` : null },
+            {
+              label: "Avg / p95 / p99 latency",
+              value: stats
+                ? `${formatSeconds(stats.avg_latency_s)} / ${formatSeconds(stats.p95_latency_s)} / ${formatSeconds(stats.p99_latency_s)}`
+                : null,
+            },
             { label: "Error rate", value: stats ? `${(stats.error_rate * 100).toFixed(1)}%` : null },
             {
               label: "Helpful",
@@ -480,6 +485,48 @@ export default function AdminPage() {
             </div>
           ))}
         </div>
+
+        {/* Latency distribution */}
+        <section className="mb-8">
+          <h2 className="mb-1 text-sm font-semibold text-gray-900">Latency distribution</h2>
+          <p className="mb-3 text-xs text-gray-500">
+            How many queries fell into each response-time bucket — a single average or percentile can hide a slow
+            tail that a distribution makes obvious.
+          </p>
+
+          {stats === null && !loadError && (
+            <div className="space-y-2">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="h-6 animate-pulse rounded bg-gray-100" />
+              ))}
+            </div>
+          )}
+
+          {stats !== null && stats.query_count === 0 && (
+            <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center">
+              <p className="text-sm text-gray-500">No queries in the last {DAYS} days.</p>
+            </div>
+          )}
+
+          {stats !== null && stats.query_count > 0 && (
+            <div className="space-y-2 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+              {stats.latency_histogram.map((bucket) => (
+                <div key={bucket.label} className="flex items-center gap-3">
+                  <span className="w-24 shrink-0 text-xs text-gray-600">{bucket.label}</span>
+                  <div className="h-4 flex-1 overflow-hidden rounded bg-gray-100">
+                    <div
+                      className="h-full rounded bg-blue-500"
+                      style={{ width: `${Math.max(bucket.percentage * 100, bucket.count > 0 ? 2 : 0)}%` }}
+                    />
+                  </div>
+                  <span className="w-28 shrink-0 text-right text-xs text-gray-500">
+                    {bucket.count.toLocaleString()} ({(bucket.percentage * 100).toFixed(1)}%)
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
 
         {/* Recent errors */}
         <section className="mb-8">

@@ -1,5 +1,11 @@
 import { apiFetch } from "./auth";
 
+export interface LatencyBucketRow {
+  label: string;
+  count: number;
+  percentage: number;
+}
+
 export interface OrgStats {
   query_count: number;
   error_count: number;
@@ -8,6 +14,8 @@ export interface OrgStats {
   avg_latency_s: number;
   p50_latency_s: number;
   p95_latency_s: number;
+  p99_latency_s: number;
+  latency_histogram: LatencyBucketRow[];
   feedback_count: number;
   feedback_positive_rate: number;
   cache_hit_count: number;

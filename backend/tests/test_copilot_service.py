@@ -16,6 +16,8 @@ def _fake_stats() -> OrgStatsResponse:
         avg_latency_s=1.0,
         p50_latency_s=1.0,
         p95_latency_s=1.5,
+        p99_latency_s=1.9,
+        latency_histogram=[],
         feedback_count=2,
         feedback_positive_rate=1.0,
         cache_hit_count=3,
