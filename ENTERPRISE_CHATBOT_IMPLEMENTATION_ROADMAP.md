@@ -91,6 +91,8 @@ Depends on: none. Implement first.
 
 **Goal:** Central entry boundary for authentication, throttling and abuse controls.
 
+**Status:** Application layer implemented. Redis-backed atomic tenant/user and authentication-IP limits, trusted-proxy handling, `Retry-After`, explicit fail-closed behavior and local Docker Redis are present. API Gateway/WAF deployment policies and multi-instance load testing remain infrastructure work.
+
 Create/change:
 
 - `backend/app/middleware/correlation.py`

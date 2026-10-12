@@ -26,6 +26,7 @@ openai = "^1.54.0"
 pyjwt = { extras = ["crypto"], version = "^2.9.0" }
 email-validator = "^2.0.0"
 langsmith = "^0.11.0"
+redis = "^5.2.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.0"

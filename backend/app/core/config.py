@@ -50,6 +50,17 @@ class Settings(BaseModel):
     # if it proves too costly/noisy in practice) without touching the
     # on-demand admin co-pilot, which is a separate code path.
     error_watchdog_enabled: bool = os.getenv("ERROR_WATCHDOG_ENABLED", "true").lower() == "true"
+    redis_url: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    redis_connect_timeout_seconds: float = float(os.getenv("REDIS_CONNECT_TIMEOUT_SECONDS", "1"))
+    redis_socket_timeout_seconds: float = float(os.getenv("REDIS_SOCKET_TIMEOUT_SECONDS", "1"))
+    rate_limit_enabled: bool = os.getenv("RATE_LIMIT_ENABLED", "false").lower() == "true"
+    rate_limit_window_seconds: int = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
+    tenant_requests_per_window: int = int(os.getenv("TENANT_REQUESTS_PER_WINDOW", "300"))
+    user_requests_per_window: int = int(os.getenv("USER_REQUESTS_PER_WINDOW", "60"))
+    auth_ip_requests_per_window: int = int(os.getenv("AUTH_IP_REQUESTS_PER_WINDOW", "10"))
+    trusted_proxy_cidrs: list[str] = [
+        cidr.strip() for cidr in os.getenv("TRUSTED_PROXY_CIDRS", "").split(",") if cidr.strip()
+    ]
 
 
 settings = Settings()

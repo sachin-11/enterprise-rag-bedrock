@@ -18,6 +18,7 @@ from app.core.request_context import (
     normalize_correlation_id,
     reset_correlation_id,
 )
+from app.middleware.rate_limit import RateLimitMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,11 @@ async def _lifespan(app: FastAPI):
             "BEDROCK_GUARDRAIL_ID is not set — chat requests will run without "
             "AWS Bedrock Guardrail content screening (guardrail_service.check_content "
             "no-ops). Set BEDROCK_GUARDRAIL_ID before deploying to production."
+        )
+    if not settings.rate_limit_enabled:
+        logger.warning(
+            "RATE_LIMIT_ENABLED is false — distributed API rate limiting is disabled. "
+            "Enable it and configure REDIS_URL before production deployment."
         )
     yield
 
@@ -67,6 +73,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(RateLimitMiddleware)
 
 app.include_router(health_router)
 app.include_router(auth_router)

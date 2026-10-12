@@ -1,9 +1,11 @@
 from fastapi import Depends, HTTPException, Request, status
 
+from app.core.config import settings
 from app.core.request_context import build_web_request_context
 from app.models.context import RequestContext
 from app.models.user import CurrentUser
 from app.services.auth_service import AuthError, NoOrganizationError, verify_id_token
+from app.services.rate_limit_service import RateLimitBackendError, RateLimitScope, get_rate_limit_service
 
 ID_TOKEN_COOKIE = "id_token"
 REFRESH_TOKEN_COOKIE = "refresh_token"
@@ -54,7 +56,31 @@ def get_request_context(
 ) -> RequestContext:
     """Return the channel-neutral context derived from verified identity."""
 
-    return build_web_request_context(request, current_user)
+    context = build_web_request_context(request, current_user)
+    if settings.rate_limit_enabled:
+        try:
+            decision = get_rate_limit_service().check(
+                [
+                    RateLimitScope("tenant", context.tenant_id, settings.tenant_requests_per_window),
+                    RateLimitScope(
+                        "tenant-user",
+                        f"{context.tenant_id}:{context.user_id}",
+                        settings.user_requests_per_window,
+                    ),
+                ]
+            )
+        except RateLimitBackendError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Request protection is temporarily unavailable.",
+            ) from exc
+        if not decision.allowed:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Request rate limit exceeded.",
+                headers={"Retry-After": str(decision.retry_after_seconds)},
+            )
+    return context
 
 
 def require_admin_context(context: RequestContext = Depends(get_request_context)) -> RequestContext:

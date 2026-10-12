@@ -122,8 +122,18 @@ docker compose up --build
 | `COOKIE_SECURE` | `False` for local http dev; `True` once served over https |
 | `DYNAMODB_CONVERSATIONS_TABLE`, `DYNAMODB_MESSAGES_TABLE` | Per-user chat history (conversations are private; documents are shared per-org) |
 | `LANGCHAIN_TRACING_V2`, `LANGCHAIN_API_KEY`, `LANGCHAIN_PROJECT` | LangSmith tracing — blank/`false` makes every `@traceable` call a no-op |
+| `REDIS_URL`, `RATE_LIMIT_ENABLED` | Shared Redis backend and explicit switch for distributed API rate limiting |
+| `RATE_LIMIT_WINDOW_SECONDS`, `TENANT_REQUESTS_PER_WINDOW`, `USER_REQUESTS_PER_WINDOW` | Authenticated tenant/user fixed-window limits |
+| `AUTH_IP_REQUESTS_PER_WINDOW`, `TRUSTED_PROXY_CIDRS` | Authentication abuse limit and proxies allowed to supply `X-Forwarded-For` |
 | `INVITE_SIGNING_KEY` | Random secret (`python -c "import secrets; print(secrets.token_hex(32))"`) signing invite tokens |
 | `SES_SENDER_EMAIL`, `FRONTEND_BASE_URL` | Email-delivered invites — verified SES sender + the origin used to build join links |
+
+When rate limiting is enabled, authenticated requests consume both a tenant
+bucket and a tenant/user bucket atomically. Signup, login, password and token
+endpoints use a separate client-IP bucket. Limit responses return `429` with
+`Retry-After`; an unavailable Redis backend returns `503` instead of silently
+bypassing protection. `X-Forwarded-For` is honored only for peers listed in
+`TRUSTED_PROXY_CIDRS`.
 
 ## Retrieval architecture
 
