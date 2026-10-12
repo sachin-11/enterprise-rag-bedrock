@@ -11,8 +11,11 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379/0
       - RATE_LIMIT_ENABLED=true
+      - DATABASE_URL=postgresql+psycopg://postgres:postgres@postgres:5432/enterprise_rag
     depends_on:
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
 
   frontend:
@@ -39,3 +42,22 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: enterprise_rag
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d enterprise_rag"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres_data:

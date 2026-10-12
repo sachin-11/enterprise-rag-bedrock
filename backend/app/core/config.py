@@ -64,6 +64,9 @@ class Settings(BaseModel):
     slack_signing_secret: str = os.getenv("SLACK_SIGNING_SECRET", "")
     teams_app_id: str = os.getenv("TEAMS_APP_ID", "")
     channel_identity_mappings_json: str = os.getenv("CHANNEL_IDENTITY_MAPPINGS_JSON", "{}")
+    database_url: str = os.getenv(
+        "DATABASE_URL", "postgresql+psycopg://postgres:postgres@localhost:5432/enterprise_rag"
+    )
 
 
 settings = Settings()

@@ -175,6 +175,8 @@ Depends on: Module 0.
 
 **Goal:** Provide transactional workflow state and distributed ephemeral state.
 
+**Status:** Phase 4A implemented locally: SQLAlchemy session foundation, tenant/user/conversation/message/channel-identity schema, tenant-aware foreign keys, initial Alembic migration and Docker PostgreSQL are present. Repository adapters, data backfill and controlled DynamoDB cutover remain in phases 4B–4D.
+
 Create:
 
 - `backend/app/db/session.py`, `backend/app/db/base.py`
