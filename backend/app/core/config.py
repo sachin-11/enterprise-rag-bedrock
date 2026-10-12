@@ -61,6 +61,9 @@ class Settings(BaseModel):
     trusted_proxy_cidrs: list[str] = [
         cidr.strip() for cidr in os.getenv("TRUSTED_PROXY_CIDRS", "").split(",") if cidr.strip()
     ]
+    slack_signing_secret: str = os.getenv("SLACK_SIGNING_SECRET", "")
+    teams_app_id: str = os.getenv("TEAMS_APP_ID", "")
+    channel_identity_mappings_json: str = os.getenv("CHANNEL_IDENTITY_MAPPINGS_JSON", "{}")
 
 
 settings = Settings()

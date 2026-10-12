@@ -117,6 +117,8 @@ Depends on: Module 0 and Module 4 Redis foundation.
 
 **Goal:** Channel-specific protocol code stays outside orchestration logic.
 
+**Status:** Secure adapter foundation implemented. Channel-neutral contracts, Slack HMAC/replay verification, Teams Bot Connector JWT verification, message normalization, webhook routes and server-side enterprise identity mapping are present. Durable event deduplication, outbound Slack/Teams delivery and confirmation cards remain to be connected after Modules 3, 4 and 7 provide orchestration and action state.
+
 Create:
 
 - `backend/app/channels/base.py`: normalized inbound/outbound contracts.
