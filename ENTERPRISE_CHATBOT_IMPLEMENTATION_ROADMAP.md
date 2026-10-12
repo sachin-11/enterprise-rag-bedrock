@@ -142,6 +142,8 @@ Depends on: Modules 0 and 1.
 
 **Goal:** Replace the single hard-wired RAG path with explicit routing.
 
+**Status:** Routing foundation implemented. Web, Slack and Teams now share a schema-bound planner with `DIRECT`, `RAG`, `TOOL_READ`, `TOOL_WRITE` and `ESCALATE` routes; route metadata is traced and non-RAG routes cannot invoke retrieval or perform actions. Extracting the legacy RAG implementation from `api/chat.py` into `services/rag_pipeline.py` remains the next refactor within this module.
+
 Create/change:
 
 - `backend/app/services/orchestrator_service.py`

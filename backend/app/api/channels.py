@@ -6,6 +6,8 @@ from app.channels.slack import SlackVerificationError, normalize_slack_event, ve
 from app.channels.teams import TeamsVerificationError, normalize_teams_activity, verify_teams_token
 from app.core.config import settings
 from app.services.identity_mapping_service import IdentityMappingError, resolve_channel_identity
+from app.models.orchestration import OrchestratorInput
+from app.services.orchestrator_service import plan_request
 
 router = APIRouter(prefix="/channels", tags=["channels"])
 
@@ -34,7 +36,8 @@ async def slack_events(request: Request) -> dict:
         )
     except IdentityMappingError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
-    return {"accepted": True, "event_id": message.event_id, "tenant_id": context.tenant_id}
+    plan = plan_request(OrchestratorInput(context=context, message=message.text, conversation_id=message.conversation_id))
+    return {"accepted": True, "event_id": message.event_id, "route": plan.route.value, "response": plan.response_text}
 
 
 @router.post("/teams/messages")
@@ -55,4 +58,5 @@ async def teams_messages(request: Request) -> dict:
         )
     except IdentityMappingError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
-    return {"accepted": True, "event_id": message.event_id, "tenant_id": context.tenant_id}
+    plan = plan_request(OrchestratorInput(context=context, message=message.text, conversation_id=message.conversation_id))
+    return {"accepted": True, "event_id": message.event_id, "route": plan.route.value, "response": plan.response_text}

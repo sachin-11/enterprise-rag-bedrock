@@ -175,6 +175,19 @@ def test_missing_session_cookie_returns_401():
     assert response.status_code == 401
 
 
+def test_direct_route_does_not_require_knowledge_base(monkeypatch):
+    _as_user("tenant-a")
+    monkeypatch.setattr("app.api.chat.settings.bedrock_kb_id", "")
+
+    response = client.post("/chat/query", json={"query": "hello"})
+
+    assert response.status_code == 200
+    events = _parse_sse(response.text)
+    assert {"type": "route", "route": "direct"} in events
+    assert not any(event["type"] == "sources" for event in events)
+    assert events[-1] == {"type": "done"}
+
+
 def test_hyde_failure_falls_back_to_standalone_query_as_retrieval_text(monkeypatch):
     _as_user("tenant-a")
     monkeypatch.setattr("app.api.chat.generate_hyde_passage", lambda query: None)

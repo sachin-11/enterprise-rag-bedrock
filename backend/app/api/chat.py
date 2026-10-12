@@ -15,6 +15,7 @@ from starlette.background import BackgroundTask
 from app.core.config import settings
 from app.core.dependencies import get_request_context
 from app.models.context import RequestContext
+from app.models.orchestration import OrchestratorInput, RouteType
 from app.models.chat import ChatQueryRequest, FeedbackRequest, SourceCitation
 from app.models.user import MessageResponse
 from app.services import cache_service, error_watchdog_service
@@ -31,6 +32,7 @@ from app.services.feedback_service import FeedbackError, submit_feedback
 from app.services.guardrail_service import check_content
 from app.services.injection_service import scan_for_injection
 from app.services.pii_service import redact_pii
+from app.services.orchestrator_service import plan_request
 from app.services.query_service import MAX_HISTORY_TURNS, generate_hyde_passage, rewrite_query, summarize_history
 from app.services.retrieval_service import embed_text, rerank_with_cohere
 
@@ -377,9 +379,12 @@ async def chat_query(
     context: RequestContext = Depends(get_request_context),
 ) -> StreamingResponse:
     tenant_id = context.tenant_id
+    plan = plan_request(
+        OrchestratorInput(context=context, message=payload.query, conversation_id=payload.conversation_id)
+    )
 
     kb_id = settings.bedrock_kb_id
-    if not kb_id:
+    if plan.route is RouteType.RAG and not kb_id:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="BEDROCK_KB_ID is not configured.",
@@ -428,6 +433,15 @@ async def chat_query(
 
     async def event_stream() -> AsyncIterator[str]:
         yield _sse({"type": "conversation", "conversation_id": conversation_id})
+
+        if plan.route is not RouteType.RAG:
+            await run_in_threadpool(append_message, conversation_id, "user", payload.query, [])
+            await run_in_threadpool(append_message, conversation_id, "assistant", plan.response_text, [])
+            await run_in_threadpool(touch_conversation, context.user_id, conversation_id)
+            yield _sse({"type": "route", "route": plan.route.value})
+            yield _sse({"type": "token", "text": plan.response_text})
+            yield _sse({"type": "done"})
+            return
 
         collected_text: list[str] = []
         sources: list[SourceCitation] = []
