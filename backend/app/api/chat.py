@@ -35,6 +35,7 @@ from app.services.pii_service import redact_pii
 from app.services.orchestrator_service import plan_request
 from app.services.query_service import MAX_HISTORY_TURNS, generate_hyde_passage, rewrite_query, summarize_history
 from app.services.retrieval_service import embed_text, rerank_with_cohere
+from app.services.retrieval.authorizer import filter_authorized_results
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 logger = logging.getLogger(__name__)
@@ -207,7 +208,13 @@ async def _run_rag_pipeline(
     # cache entry across users would risk serving one of them an answer
     # built from documents they can't actually see.
     query_embedding = await run_in_threadpool(embed_text, standalone_query)
-    cached = cache_service.lookup(context.tenant_id, context.user_id, context.is_admin, query_embedding)
+    # Member answers depend on mutable document shares. Cached citations do
+    # not carry enough ACL metadata to reauthorize after a share is revoked.
+    cached = (
+        cache_service.lookup(context.tenant_id, context.user_id, context.is_admin, query_embedding)
+        if context.is_admin
+        else None
+    )
     if run is not None:
         run.extra.setdefault("metadata", {}).update({"cache_hit": cached is not None})
     if cached is not None:
@@ -245,7 +252,9 @@ async def _run_rag_pipeline(
         yield "error", f"Failed to retrieve context: {exc}"
         return
 
+    retrieved = filter_authorized_results(retrieved, context)
     reranked = await run_in_threadpool(rerank_with_cohere, standalone_query, retrieved, RERANK_TOP_N)
+    reranked = filter_authorized_results(reranked, context)
     # Drop anything the reranker itself scored as not actually relevant —
     # see MIN_RELEVANCE_SCORE above. Applied after rerank, not before, since
     # RETRIEVE_TOP_K's fused/KB score isn't comparable to Cohere's.
@@ -336,15 +345,16 @@ async def _run_rag_pipeline(
     # Only reached if generation completed and the OUTPUT guardrail did not
     # intervene — a failed, partial, or blocked answer must never be cached
     # as if it were a real one.
-    cache_service.store(
-        context.tenant_id,
-        context.user_id,
-        context.is_admin,
-        standalone_query,
-        query_embedding,
-        answer_text,
-        sources,
-    )
+    if context.is_admin:
+        cache_service.store(
+            context.tenant_id,
+            context.user_id,
+            context.is_admin,
+            standalone_query,
+            query_embedding,
+            answer_text,
+            sources,
+        )
 
 
 async def run_pipeline_once(

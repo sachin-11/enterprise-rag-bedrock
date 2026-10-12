@@ -145,6 +145,13 @@ answer; authorization and rate limiting retain their stricter behavior.
 
 `/chat/query` retrieves context from the **Bedrock Knowledge Base** (`retrieve_from_kb` in `bedrock_kb_service.py`); chunking, embedding, and indexing happen inside Bedrock when you call `POST /documents/sync-kb`. See [Retrieval isolation](#retrieval-isolation-tenant--per-document-sharing) above for exactly how tenant and sharing scoping works.
 
+The chat path checks the returned chunks' tenant and document sharing metadata
+again before reranking or building a prompt. Chunks without valid security
+metadata are discarded and logged with the request correlation ID. Member
+semantic-cache hits are disabled while cached citations cannot be reauthorized
+after sharing changes. The managed KB's deployed search mode still needs
+verification before calling this production path hybrid retrieval.
+
 The codebase also has a **standalone hybrid retrieval path** (`chunking_service.py` → `ingestion_service.py` → `retrieval_service.py`: dense + BM25 + RRF fusion against a self-managed OpenSearch index, via `POST /documents/{id}/ingest`) that isn't currently wired into `/chat/query` — kept as an alternative if you provision a real OpenSearch domain/collection later.
 
 ## API reference

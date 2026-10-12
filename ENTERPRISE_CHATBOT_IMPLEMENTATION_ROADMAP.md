@@ -209,6 +209,8 @@ Depends on: Module 0. Start early; later modules build on it.
 
 **Goal:** Make hybrid retrieval and document ACL behavior explicit and testable.
 
+**Status:** Post-retrieval tenant and document ACL checks are wired into the production Bedrock chat path, with audit warnings and adversarial tests. Member semantic-cache hits are disabled until cached evidence can be reauthorized after share changes. The deployed Bedrock search mode, standalone hybrid-path consolidation, and current-source ACL checks remain to be completed.
+
 Create/change:
 
 - `backend/app/services/retrieval/authorizer.py`

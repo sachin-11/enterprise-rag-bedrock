@@ -224,11 +224,9 @@ def retrieve_from_kb(
         response = client.retrieve(
             knowledgeBaseId=kb_id,
             retrievalQuery={"text": query_text},
-            # "Managed" (Quick-create) knowledge bases require managedSearchConfiguration,
-            # not vectorSearchConfiguration (which is only for self-managed vector stores
-            # like OpenSearch/Pinecone) — confirmed against this KB's actual type via
-            # `aws bedrock-agent get-knowledge-base`. It always runs hybrid search
-            # internally, so there's no overrideSearchType to set here.
+            # This deployed KB uses managedSearchConfiguration. Search-mode
+            # details must be confirmed against the deployed KB configuration;
+            # this request does not claim or force HYBRID retrieval.
             retrievalConfiguration={
                 "managedSearchConfiguration": {
                     "numberOfResults": top_k,

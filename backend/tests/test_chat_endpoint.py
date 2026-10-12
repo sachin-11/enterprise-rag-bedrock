@@ -32,7 +32,7 @@ FAKE_KB = {
             text="TENANT-A-ONLY: Q1 revenue for Acme Corp was $4.2M, up 12% year over year.",
             score=0.95,
             doc_name="acme-q1-report.pdf",
-            metadata={"tenant_id": "tenant-a"},
+            metadata={"tenant_id": "tenant-a", "uploaded_by": "test-user"},
         )
     ],
     "tenant-b": [
@@ -41,7 +41,7 @@ FAKE_KB = {
             text="TENANT-B-ONLY: Q1 revenue for Globex Corp was $4.2M, up 12% year over year.",
             score=0.95,
             doc_name="globex-q1-report.pdf",
-            metadata={"tenant_id": "tenant-b"},
+            metadata={"tenant_id": "tenant-b", "uploaded_by": "test-user"},
         )
     ],
 }
@@ -164,6 +164,59 @@ def test_tenant_b_never_receives_tenant_a_chunks():
     assert "TENANT-B-ONLY" in sources[0]["excerpt"]
     assert "TENANT-A-ONLY" not in sources[0]["excerpt"]
     assert "acme" not in sources[0]["doc_name"].lower()
+
+
+def test_unauthorized_chunks_are_removed_before_reranking(monkeypatch):
+    _as_user("tenant-a")
+    seen = {}
+    unauthorized = KBRetrievalResult(
+        chunk_id="foreign",
+        text="FOREIGN SECRET",
+        score=0.99,
+        doc_name="foreign.pdf",
+        metadata={"tenant_id": "tenant-b", "uploaded_by": "test-user"},
+    )
+    unshared = KBRetrievalResult(
+        chunk_id="unshared",
+        text="PRIVATE SECRET",
+        score=0.99,
+        doc_name="private.pdf",
+        metadata={"tenant_id": "tenant-a", "uploaded_by": "someone-else"},
+    )
+    monkeypatch.setattr(
+        "app.api.chat.retrieve_from_kb",
+        lambda *args, **kwargs: [unauthorized, unshared, FAKE_KB["tenant-a"][0]],
+    )
+
+    def _rerank(query, candidates, top_n):
+        seen["rerank_ids"] = [candidate.chunk_id for candidate in candidates]
+        return candidates
+
+    monkeypatch.setattr("app.api.chat.rerank_with_cohere", _rerank)
+    response = client.post("/chat/query", json={"query": "What was Q1 revenue?"})
+    events = _parse_sse(response.text)
+    sources = next(event["sources"] for event in events if event["type"] == "sources")
+
+    assert response.status_code == 200
+    assert seen["rerank_ids"] == ["a-doc-1-chunk-0"]
+    assert len(sources) == 1
+    assert "FOREIGN SECRET" not in response.text
+    assert "PRIVATE SECRET" not in response.text
+
+
+def test_member_answer_does_not_use_stale_semantic_cache(monkeypatch):
+    _as_user("tenant-a")
+
+    def _unexpected_cache_access(*args, **kwargs):
+        raise AssertionError("Member cache access would bypass current document ACL")
+
+    monkeypatch.setattr("app.services.cache_service.lookup", _unexpected_cache_access)
+    monkeypatch.setattr("app.services.cache_service.store", _unexpected_cache_access)
+
+    response = client.post("/chat/query", json={"query": "What was Q1 revenue?"})
+
+    assert response.status_code == 200
+    assert any(event["type"] == "sources" for event in _parse_sse(response.text))
 
 
 def test_missing_session_cookie_returns_401():
