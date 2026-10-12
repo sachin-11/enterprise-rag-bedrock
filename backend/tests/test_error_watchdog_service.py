@@ -44,8 +44,10 @@ def test_succeeds_on_a_later_attempt_sends_no_email(monkeypatch):
     assert log_event_mock.call_args[0][3] == error_watchdog_service.audit_service.ACTION_AUTO_RETRY_SUCCEEDED
     # Retried scoped to the ORIGINAL failing member, never elevated to admin.
     for call in run_pipeline_mock.call_args_list:
-        assert call.args[4] == "member-1"
-        assert call.args[5] is False
+        context = call.args[3]
+        assert context.user_id == "member-1"
+        assert context.tenant_id == "org-a"
+        assert context.is_admin is False
 
 
 def test_exhausts_retries_notifies_every_enabled_admin(monkeypatch):

@@ -12,7 +12,8 @@ from opensearchpy.exceptions import OpenSearchException
 
 from app.core.aws_clients import get_s3_client
 from app.core.config import settings
-from app.core.dependencies import get_current_user, require_admin
+from app.core.dependencies import get_request_context, require_admin_context
+from app.models.context import RequestContext
 from app.models.document import (
     DocumentDeleteResponse,
     DocumentListResponse,
@@ -24,7 +25,6 @@ from app.models.document import (
     UpdateSharingRequest,
 )
 from app.models.kb_sync import SyncKBRequest, SyncKBResponse
-from app.models.user import CurrentUser
 from app.services import audit_service, auth_service, cache_service
 from app.services.bedrock_kb_service import (
     SHARED_WITH_METADATA_KEY,
@@ -186,7 +186,7 @@ async def _read_with_limit(file: UploadFile, max_bytes: int) -> bytes:
 )
 async def upload_document(
     file: UploadFile = File(...),
-    current_user: CurrentUser = Depends(require_admin),
+    current_user: RequestContext = Depends(require_admin_context),
 ) -> DocumentUploadResponse:
     tenant_id = current_user.tenant_id
 
@@ -298,7 +298,7 @@ async def upload_document(
 
 
 @router.get("", response_model=DocumentListResponse, status_code=status.HTTP_200_OK)
-async def list_documents_endpoint(current_user: CurrentUser = Depends(get_current_user)) -> DocumentListResponse:
+async def list_documents_endpoint(current_user: RequestContext = Depends(get_request_context)) -> DocumentListResponse:
     tenant_id = current_user.tenant_id
 
     def _load() -> list[dict]:
@@ -341,7 +341,7 @@ async def list_documents_endpoint(current_user: CurrentUser = Depends(get_curren
 )
 async def delete_document_endpoint(
     document_id: str,
-    current_user: CurrentUser = Depends(require_admin),
+    current_user: RequestContext = Depends(require_admin_context),
 ) -> DocumentDeleteResponse:
     tenant_id = current_user.tenant_id
 
@@ -398,7 +398,7 @@ async def delete_document_endpoint(
 )
 async def get_document_shares(
     document_id: str,
-    current_user: CurrentUser = Depends(require_admin),
+    current_user: RequestContext = Depends(require_admin_context),
 ) -> DocumentSharingResponse:
     tenant_id = current_user.tenant_id
 
@@ -427,7 +427,7 @@ async def get_document_shares(
 async def update_document_shares(
     document_id: str,
     payload: UpdateSharingRequest,
-    current_user: CurrentUser = Depends(require_admin),
+    current_user: RequestContext = Depends(require_admin_context),
 ) -> DocumentSharingResponse:
     tenant_id = current_user.tenant_id
 
@@ -481,7 +481,7 @@ async def update_document_shares(
 )
 async def ingest_document_endpoint(
     document_id: str,
-    current_user: CurrentUser = Depends(require_admin),
+    current_user: RequestContext = Depends(require_admin_context),
 ) -> IngestResponse:
     # This endpoint had NO auth check at all until this fix — anyone, logged
     # in or not, could trigger embedding calls (real cost) and an
@@ -521,7 +521,7 @@ async def ingest_document_endpoint(
 )
 async def sync_kb(
     payload: SyncKBRequest = SyncKBRequest(),
-    _current_user: CurrentUser = Depends(get_current_user),
+    _current_user: RequestContext = Depends(get_request_context),
 ) -> SyncKBResponse:
     # No tenant scoping here — a Bedrock KB sync reconciles the whole
     # knowledge base at once, not one tenant's slice of it. Still requires a

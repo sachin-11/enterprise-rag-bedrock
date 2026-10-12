@@ -1,4 +1,5 @@
 import logging
+from contextvars import Token
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -11,6 +12,12 @@ from app.api.conversations import router as conversations_router
 from app.api.documents import router as documents_router
 from app.api.health import router as health_router
 from app.core.config import settings
+from app.core.request_context import (
+    CORRELATION_ID_HEADER,
+    bind_correlation_id,
+    normalize_correlation_id,
+    reset_correlation_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +40,19 @@ async def _lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Enterprise RAG Bedrock API", lifespan=_lifespan)
+
+
+@app.middleware("http")
+async def correlation_context(request, call_next):
+    correlation_id = normalize_correlation_id(request.headers.get(CORRELATION_ID_HEADER))
+    request.state.correlation_id = correlation_id
+    token: Token = bind_correlation_id(correlation_id)
+    try:
+        response = await call_next(request)
+        response.headers[CORRELATION_ID_HEADER] = correlation_id
+        return response
+    finally:
+        reset_correlation_id(token)
 
 # allow_credentials is required for the session cookies set by /auth/* to be
 # sent back on cross-origin requests — note this only works with an explicit

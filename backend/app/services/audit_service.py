@@ -22,6 +22,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from app.core.aws_clients import get_dynamodb_resource
 from app.core.config import settings
+from app.core.request_context import get_correlation_id
 from app.models.admin import AuditEventRow
 
 logger = logging.getLogger(__name__)
@@ -62,6 +63,7 @@ def log_event(
     target: Optional[str] = None,
     details: Optional[str] = None,
     notified_count: Optional[int] = None,
+    correlation_id: Optional[str] = None,
 ) -> None:
     """Best-effort: a logging failure must never fail the real action it's
     recording. Callers invoke this after their action has already
@@ -80,6 +82,7 @@ def log_event(
         "actor_email": actor_email,
         "action": action,
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "correlation_id": correlation_id or get_correlation_id() or "background",
     }
     if target is not None:
         item["target"] = target

@@ -24,6 +24,7 @@ from langchain_openai import ChatOpenAI
 
 from app.api.chat import run_pipeline_once
 from app.core.config import settings
+from app.core.request_context import build_internal_request_context
 from app.models.copilot import CopilotAction, CopilotMessage, CopilotResponse, CopilotToolCall
 from app.services import admin_service, audit_service, email_service
 
@@ -210,7 +211,13 @@ async def _dispatch_tool(
         # The co-pilot is only reachable via require_admin, so the caller is
         # always an admin — matches the dashboard retry button's use of the
         # requesting user's own is_admin.
-        succeeded, text = await run_pipeline_once(inputs["query"], inputs["chat_history"], tenant_id, kb_id, admin_user_id, True)
+        retry_context = build_internal_request_context(
+            user_id=admin_user_id,
+            email=admin_email,
+            tenant_id=tenant_id,
+            is_admin=True,
+        )
+        succeeded, text = await run_pipeline_once(inputs["query"], inputs["chat_history"], kb_id, retry_context)
         summary = f"Retried run {run_id}: {'now succeeds' if succeeded else 'still fails'}."
         await run_in_threadpool(
             audit_service.log_event,

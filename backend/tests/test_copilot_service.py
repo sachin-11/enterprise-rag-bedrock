@@ -111,7 +111,12 @@ def test_retry_failed_query_reuses_pipeline_and_logs_audit(monkeypatch):
 
     result = asyncio.run(copilot_service.run_copilot("org-a", "user-1", "admin@org-a.com", "retry run abc-123", []))
 
-    run_pipeline_mock.assert_called_once_with("what is our refund policy", [], "org-a", "kb-123", "user-1", True)
+    run_pipeline_mock.assert_called_once()
+    query, history, kb_id, context = run_pipeline_mock.call_args.args
+    assert (query, history, kb_id) == ("what is our refund policy", [], "kb-123")
+    assert context.tenant_id == "org-a"
+    assert context.user_id == "user-1"
+    assert context.is_admin is True
     log_event_mock.assert_called_once()
     assert log_event_mock.call_args[0][3] == copilot_service.audit_service.ACTION_COPILOT_RETRY
     assert result.actions_taken[0].action_type == "retry"

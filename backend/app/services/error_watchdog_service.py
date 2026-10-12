@@ -23,6 +23,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from app.core.config import settings
+from app.core.request_context import build_internal_request_context
 from app.services import audit_service, auth_service, email_service
 
 logger = logging.getLogger(__name__)
@@ -110,7 +111,13 @@ async def investigate_error(
     while attempts < MAX_AUTO_RETRIES:
         attempts += 1
         await asyncio.sleep(RETRY_BACKOFF_SECONDS)
-        succeeded, result = await run_pipeline_once(query, chat_history, tenant_id, kb_id, user_id, is_admin)
+        retry_context = build_internal_request_context(
+            user_id=user_id,
+            email="system-retry@internal.example.com",
+            tenant_id=tenant_id,
+            is_admin=is_admin,
+        )
+        succeeded, result = await run_pipeline_once(query, chat_history, kb_id, retry_context)
         if succeeded:
             break
         last_error = result

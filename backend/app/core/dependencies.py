@@ -1,5 +1,7 @@
 from fastapi import Depends, HTTPException, Request, status
 
+from app.core.request_context import build_web_request_context
+from app.models.context import RequestContext
 from app.models.user import CurrentUser
 from app.services.auth_service import AuthError, NoOrganizationError, verify_id_token
 
@@ -44,3 +46,18 @@ def require_admin(current_user: CurrentUser = Depends(get_current_user)) -> Curr
     if not current_user.is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required.")
     return current_user
+
+
+def get_request_context(
+    request: Request,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> RequestContext:
+    """Return the channel-neutral context derived from verified identity."""
+
+    return build_web_request_context(request, current_user)
+
+
+def require_admin_context(context: RequestContext = Depends(get_request_context)) -> RequestContext:
+    if not context.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required.")
+    return context

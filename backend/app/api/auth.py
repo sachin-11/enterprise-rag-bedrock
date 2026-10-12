@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from app.core.config import settings
-from app.core.dependencies import ID_TOKEN_COOKIE, REFRESH_TOKEN_COOKIE, USERNAME_COOKIE, get_current_user
+from app.core.dependencies import ID_TOKEN_COOKIE, REFRESH_TOKEN_COOKIE, USERNAME_COOKIE, get_request_context
+from app.models.context import RequestContext
 from app.models.user import (
     AuthUserResponse,
     ConfirmRequest,
-    CurrentUser,
     ForgotPasswordRequest,
     InvitePreviewResponse,
     JoinRequest,
@@ -184,5 +184,5 @@ async def logout(request: Request, response: Response) -> MessageResponse:
 
 
 @router.get("/me", response_model=AuthUserResponse, status_code=status.HTTP_200_OK)
-async def me(current_user: CurrentUser = Depends(get_current_user)) -> AuthUserResponse:
+async def me(current_user: RequestContext = Depends(get_request_context)) -> AuthUserResponse:
     return AuthUserResponse(email=current_user.email, tenant_id=current_user.tenant_id, is_admin=current_user.is_admin)

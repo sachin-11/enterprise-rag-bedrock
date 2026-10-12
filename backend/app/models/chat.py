@@ -1,9 +1,11 @@
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class ChatQueryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     query: str
     # Omit to start a new conversation; the server creates one and returns
     # its id. History for an existing conversation is loaded server-side

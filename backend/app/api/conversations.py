@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_request_context
+from app.models.context import RequestContext
 from app.models.conversation import ConversationDetail, ConversationListResponse
-from app.models.user import CurrentUser
 from app.services.conversation_store import delete_conversation, get_conversation, list_conversations
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
@@ -10,7 +10,7 @@ router = APIRouter(prefix="/conversations", tags=["conversations"])
 
 @router.get("", response_model=ConversationListResponse, status_code=status.HTTP_200_OK)
 async def list_conversations_endpoint(
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: RequestContext = Depends(get_request_context),
 ) -> ConversationListResponse:
     return ConversationListResponse(conversations=list_conversations(current_user.user_id))
 
@@ -18,7 +18,7 @@ async def list_conversations_endpoint(
 @router.get("/{conversation_id}", response_model=ConversationDetail, status_code=status.HTTP_200_OK)
 async def get_conversation_endpoint(
     conversation_id: str,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: RequestContext = Depends(get_request_context),
 ) -> ConversationDetail:
     conversation = get_conversation(current_user.user_id, conversation_id)
     if conversation is None:
@@ -32,7 +32,7 @@ async def get_conversation_endpoint(
 @router.delete("/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_conversation_endpoint(
     conversation_id: str,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: RequestContext = Depends(get_request_context),
 ) -> None:
     deleted = delete_conversation(current_user.user_id, conversation_id)
     if not deleted:

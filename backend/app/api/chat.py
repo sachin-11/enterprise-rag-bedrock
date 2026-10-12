@@ -13,9 +13,10 @@ from langsmith import get_current_run_tree, traceable
 from starlette.background import BackgroundTask
 
 from app.core.config import settings
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_request_context
+from app.models.context import RequestContext
 from app.models.chat import ChatQueryRequest, FeedbackRequest, SourceCitation
-from app.models.user import CurrentUser, MessageResponse
+from app.models.user import MessageResponse
 from app.services import cache_service, error_watchdog_service
 from app.services.bedrock_kb_service import BedrockKBError, KBRetrievalResult, retrieve_from_kb
 from app.services.conversation_store import (
@@ -108,10 +109,8 @@ def _derive_title(query: str, max_chars: int = TITLE_MAX_CHARS) -> str:
 async def _run_rag_pipeline(
     query: str,
     chat_history: list[dict],
-    tenant_id: str,
     kb_id: str,
-    user_id: str,
-    is_admin: bool,
+    context: RequestContext,
     history_summary: str = "",
 ) -> AsyncIterator[tuple[str, object]]:
     """The retrieval + generation pipeline, as one connected LangSmith trace.
@@ -181,7 +180,15 @@ async def _run_rag_pipeline(
     # — mutating the current run tree directly is the only way that works.
     run = get_current_run_tree()
     if run is not None:
-        run.extra.setdefault("metadata", {}).update({"tenant_id": tenant_id, "user_id": user_id})
+        run.extra.setdefault("metadata", {}).update(
+            {
+                "tenant_id": context.tenant_id,
+                "user_id": context.user_id,
+                "role": context.role.value,
+                "channel": context.channel.value,
+                "correlation_id": context.correlation_id,
+            }
+        )
         yield "run_id", str(run.id)
 
     input_check = await run_in_threadpool(check_content, query, "INPUT")
@@ -198,7 +205,7 @@ async def _run_rag_pipeline(
     # cache entry across users would risk serving one of them an answer
     # built from documents they can't actually see.
     query_embedding = await run_in_threadpool(embed_text, standalone_query)
-    cached = cache_service.lookup(tenant_id, user_id, is_admin, query_embedding)
+    cached = cache_service.lookup(context.tenant_id, context.user_id, context.is_admin, query_embedding)
     if run is not None:
         run.extra.setdefault("metadata", {}).update({"cache_hit": cached is not None})
     if cached is not None:
@@ -224,7 +231,13 @@ async def _run_rag_pipeline(
     # (get_current_user) — never a client-suppliable value.
     try:
         retrieved = await run_in_threadpool(
-            retrieve_from_kb, retrieval_query_text, kb_id, tenant_id, user_id, is_admin, RETRIEVE_TOP_K
+            retrieve_from_kb,
+            retrieval_query_text,
+            kb_id,
+            context.tenant_id,
+            context.user_id,
+            context.is_admin,
+            RETRIEVE_TOP_K,
         )
     except BedrockKBError as exc:
         yield "error", f"Failed to retrieve context: {exc}"
@@ -258,7 +271,12 @@ async def _run_rag_pipeline(
         if (categories := scan_for_injection(result.text))
     ]
     if flagged:
-        logger.warning("Possible prompt-injection pattern in retrieved chunk(s) (tenant=%s): %s", tenant_id, flagged)
+        logger.warning(
+            "Possible prompt-injection pattern in retrieved chunk(s) (tenant=%s correlation=%s): %s",
+            context.tenant_id,
+            context.correlation_id,
+            flagged,
+        )
         if run is not None:
             run.extra.setdefault("metadata", {}).update({"flagged_injection_chunks": flagged})
 
@@ -304,18 +322,31 @@ async def _run_rag_pipeline(
     # why this only targets clearly-never-legitimate categories.
     redaction = redact_pii(answer_text)
     if redaction.redacted:
-        logger.warning("Redacted %s from an answer (tenant=%s)", redaction.categories_found, tenant_id)
+        logger.warning(
+            "Redacted %s from an answer (tenant=%s correlation=%s)",
+            redaction.categories_found,
+            context.tenant_id,
+            context.correlation_id,
+        )
     answer_text = redaction.text
 
     yield "token", answer_text
     # Only reached if generation completed and the OUTPUT guardrail did not
     # intervene — a failed, partial, or blocked answer must never be cached
     # as if it were a real one.
-    cache_service.store(tenant_id, user_id, is_admin, standalone_query, query_embedding, answer_text, sources)
+    cache_service.store(
+        context.tenant_id,
+        context.user_id,
+        context.is_admin,
+        standalone_query,
+        query_embedding,
+        answer_text,
+        sources,
+    )
 
 
 async def run_pipeline_once(
-    query: str, chat_history: list[dict], tenant_id: str, kb_id: str, user_id: str, is_admin: bool
+    query: str, chat_history: list[dict], kb_id: str, context: RequestContext
 ) -> tuple[bool, str]:
     """Consumes _run_rag_pipeline to completion instead of streaming it,
     for callers that just need a final result: the dashboard's per-error
@@ -328,7 +359,7 @@ async def run_pipeline_once(
     error detail on failure.
     """
     collected_text: list[str] = []
-    async for kind, data in _run_rag_pipeline(query, chat_history, tenant_id, kb_id, user_id, is_admin):
+    async for kind, data in _run_rag_pipeline(query, chat_history, kb_id, context):
         if kind in ("token", "guardrail"):
             collected_text.append(data)
         elif kind == "error":
@@ -343,9 +374,9 @@ def _sse(payload: dict) -> str:
 @router.post("/query", status_code=status.HTTP_200_OK)
 async def chat_query(
     payload: ChatQueryRequest,
-    current_user: CurrentUser = Depends(get_current_user),
+    context: RequestContext = Depends(get_request_context),
 ) -> StreamingResponse:
-    tenant_id = current_user.tenant_id
+    tenant_id = context.tenant_id
 
     kb_id = settings.bedrock_kb_id
     if not kb_id:
@@ -358,7 +389,7 @@ async def chat_query(
         # get_conversation looks up by (user_id, conversation_id) together —
         # this is what stops one user from continuing another user's
         # conversation by guessing/reusing a conversation_id.
-        conversation = await run_in_threadpool(get_conversation, current_user.user_id, payload.conversation_id)
+        conversation = await run_in_threadpool(get_conversation, context.user_id, payload.conversation_id)
         if conversation is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -373,18 +404,18 @@ async def chat_query(
         # outright. Only re-summarizes once enough new turns have aged out
         # of that window since the last time this ran, not on every request.
         history_summary, summarized_through = await run_in_threadpool(
-            get_history_summary, current_user.user_id, conversation_id
+            get_history_summary, context.user_id, conversation_id
         )
         new_boundary = len(chat_history) - MAX_HISTORY_TURNS * 2
         if new_boundary > summarized_through:
             turns_to_fold = chat_history[summarized_through:new_boundary]
             history_summary = await run_in_threadpool(summarize_history, history_summary, turns_to_fold)
             await run_in_threadpool(
-                update_history_summary, current_user.user_id, conversation_id, history_summary, new_boundary
+                update_history_summary, context.user_id, conversation_id, history_summary, new_boundary
             )
     else:
         created = await run_in_threadpool(
-            create_conversation, current_user.user_id, tenant_id, _derive_title(payload.query)
+            create_conversation, context.user_id, tenant_id, _derive_title(payload.query)
         )
         conversation_id = created.conversation_id
         chat_history = []
@@ -406,10 +437,8 @@ async def chat_query(
         async for kind, data in _run_rag_pipeline(
             payload.query,
             chat_history,
-            tenant_id,
             kb_id,
-            current_user.user_id,
-            current_user.is_admin,
+            context,
             history_summary,
         ):
             if kind == "run_id":
@@ -438,7 +467,7 @@ async def chat_query(
 
         await run_in_threadpool(append_message, conversation_id, "user", payload.query, [])
         await run_in_threadpool(append_message, conversation_id, "assistant", answer_text, sources, run_id)
-        await run_in_threadpool(touch_conversation, current_user.user_id, conversation_id)
+        await run_in_threadpool(touch_conversation, context.user_id, conversation_id)
 
         yield _sse({"type": "done"})
 
@@ -454,8 +483,8 @@ async def chat_query(
             watchdog_state["run_id"],
             payload.query,
             chat_history,
-            current_user.user_id,
-            current_user.is_admin,
+            context.user_id,
+            context.is_admin,
             watchdog_state["error_detail"],
         )
 
@@ -467,11 +496,11 @@ async def chat_query(
 @router.post("/feedback", response_model=MessageResponse, status_code=status.HTTP_200_OK)
 async def submit_answer_feedback(
     payload: FeedbackRequest,
-    current_user: CurrentUser = Depends(get_current_user),
+    context: RequestContext = Depends(get_request_context),
 ) -> MessageResponse:
     try:
         await run_in_threadpool(
-            submit_feedback, current_user.tenant_id, payload.run_id, payload.is_positive, payload.comment
+            submit_feedback, context.tenant_id, payload.run_id, payload.is_positive, payload.comment
         )
     except FeedbackError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
