@@ -20,7 +20,7 @@ from app.models.chat import ChatQueryRequest, FeedbackRequest, SourceCitation
 from app.models.user import MessageResponse
 from app.services import cache_service, error_watchdog_service
 from app.services.bedrock_kb_service import BedrockKBError, KBRetrievalResult, retrieve_from_kb
-from app.services.conversation_store import (
+from app.services.conversation_repository import (
     append_message,
     create_conversation,
     get_conversation,
@@ -394,7 +394,7 @@ async def chat_query(
         # get_conversation looks up by (user_id, conversation_id) together —
         # this is what stops one user from continuing another user's
         # conversation by guessing/reusing a conversation_id.
-        conversation = await run_in_threadpool(get_conversation, context.user_id, payload.conversation_id)
+        conversation = await run_in_threadpool(get_conversation, context, payload.conversation_id)
         if conversation is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -409,18 +409,18 @@ async def chat_query(
         # outright. Only re-summarizes once enough new turns have aged out
         # of that window since the last time this ran, not on every request.
         history_summary, summarized_through = await run_in_threadpool(
-            get_history_summary, context.user_id, conversation_id
+            get_history_summary, context, conversation_id
         )
         new_boundary = len(chat_history) - MAX_HISTORY_TURNS * 2
         if new_boundary > summarized_through:
             turns_to_fold = chat_history[summarized_through:new_boundary]
             history_summary = await run_in_threadpool(summarize_history, history_summary, turns_to_fold)
             await run_in_threadpool(
-                update_history_summary, context.user_id, conversation_id, history_summary, new_boundary
+                update_history_summary, context, conversation_id, history_summary, new_boundary
             )
     else:
         created = await run_in_threadpool(
-            create_conversation, context.user_id, tenant_id, _derive_title(payload.query)
+            create_conversation, context, _derive_title(payload.query)
         )
         conversation_id = created.conversation_id
         chat_history = []
@@ -435,9 +435,9 @@ async def chat_query(
         yield _sse({"type": "conversation", "conversation_id": conversation_id})
 
         if plan.route is not RouteType.RAG:
-            await run_in_threadpool(append_message, conversation_id, "user", payload.query, [])
-            await run_in_threadpool(append_message, conversation_id, "assistant", plan.response_text, [])
-            await run_in_threadpool(touch_conversation, context.user_id, conversation_id)
+            await run_in_threadpool(append_message, context, conversation_id, "user", payload.query, [])
+            await run_in_threadpool(append_message, context, conversation_id, "assistant", plan.response_text, [])
+            await run_in_threadpool(touch_conversation, context, conversation_id)
             yield _sse({"type": "route", "route": plan.route.value})
             yield _sse({"type": "token", "text": plan.response_text})
             yield _sse({"type": "done"})
@@ -479,9 +479,9 @@ async def chat_query(
 
         answer_text = "".join(collected_text)
 
-        await run_in_threadpool(append_message, conversation_id, "user", payload.query, [])
-        await run_in_threadpool(append_message, conversation_id, "assistant", answer_text, sources, run_id)
-        await run_in_threadpool(touch_conversation, context.user_id, conversation_id)
+        await run_in_threadpool(append_message, context, conversation_id, "user", payload.query, [])
+        await run_in_threadpool(append_message, context, conversation_id, "assistant", answer_text, sources, run_id)
+        await run_in_threadpool(touch_conversation, context, conversation_id)
 
         yield _sse({"type": "done"})
 

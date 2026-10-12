@@ -118,7 +118,7 @@ def _mock_pipeline(monkeypatch):
     # persistence is stubbed out to a no-op / fixed new-conversation-id.
     monkeypatch.setattr(
         "app.api.chat.create_conversation",
-        lambda user_id, tenant_id, title: SimpleNamespace(conversation_id="fake-conversation-id"),
+        lambda context, title: SimpleNamespace(conversation_id="fake-conversation-id"),
     )
     monkeypatch.setattr("app.api.chat.append_message", lambda *args, **kwargs: None)
     monkeypatch.setattr("app.api.chat.touch_conversation", lambda *args, **kwargs: None)
@@ -211,8 +211,8 @@ def test_existing_conversation_id_is_looked_up_and_reused(monkeypatch):
 
     captured = {}
 
-    def _fake_get_conversation(user_id, conversation_id):
-        captured["user_id"] = user_id
+    def _fake_get_conversation(context, conversation_id):
+        captured["user_id"] = context.user_id
         captured["conversation_id"] = conversation_id
         return SimpleNamespace(conversation_id=conversation_id, messages=[])
 

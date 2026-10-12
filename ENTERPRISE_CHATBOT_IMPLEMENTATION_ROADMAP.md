@@ -175,7 +175,7 @@ Depends on: Module 0.
 
 **Goal:** Provide transactional workflow state and distributed ephemeral state.
 
-**Status:** Phase 4A implemented locally: SQLAlchemy session foundation, tenant/user/conversation/message/channel-identity schema, tenant-aware foreign keys, initial Alembic migration and Docker PostgreSQL are present. Repository adapters, data backfill and controlled DynamoDB cutover remain in phases 4B–4D.
+**Status:** Phases 4A and 4B implemented on the feature branch: SQLAlchemy/Alembic foundation, tenant-aware schema, repository contract, DynamoDB adapter, PostgreSQL conversation adapter and an explicit backend feature flag are present. DynamoDB remains the default. Redis cache/session migration, backfill and controlled cutover remain in phases 4C–4D.
 
 Create:
 

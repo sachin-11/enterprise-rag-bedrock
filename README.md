@@ -121,6 +121,7 @@ docker compose up --build
 | `COGNITO_USER_POOL_ID`, `COGNITO_APP_CLIENT_ID`, `COGNITO_APP_CLIENT_SECRET`, `COGNITO_REGION` | Auth — every request's tenant/role comes from here, never a client header |
 | `COOKIE_SECURE` | `False` for local http dev; `True` once served over https |
 | `DYNAMODB_CONVERSATIONS_TABLE`, `DYNAMODB_MESSAGES_TABLE` | Per-user chat history (conversations are private; documents are shared per-org) |
+| `DATABASE_URL`, `CONVERSATION_STORE_BACKEND` | PostgreSQL connection and explicit conversation repository selection; defaults to `dynamodb` during migration |
 | `LANGCHAIN_TRACING_V2`, `LANGCHAIN_API_KEY`, `LANGCHAIN_PROJECT` | LangSmith tracing — blank/`false` makes every `@traceable` call a no-op |
 | `REDIS_URL`, `RATE_LIMIT_ENABLED` | Shared Redis backend and explicit switch for distributed API rate limiting |
 | `RATE_LIMIT_WINDOW_SECONDS`, `TENANT_REQUESTS_PER_WINDOW`, `USER_REQUESTS_PER_WINDOW` | Authenticated tenant/user fixed-window limits |

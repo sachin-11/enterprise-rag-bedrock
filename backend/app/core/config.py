@@ -67,6 +67,7 @@ class Settings(BaseModel):
     database_url: str = os.getenv(
         "DATABASE_URL", "postgresql+psycopg://postgres:postgres@localhost:5432/enterprise_rag"
     )
+    conversation_store_backend: str = os.getenv("CONVERSATION_STORE_BACKEND", "dynamodb").lower()
 
 
 settings = Settings()
