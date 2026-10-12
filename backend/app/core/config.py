@@ -68,6 +68,7 @@ class Settings(BaseModel):
         "DATABASE_URL", "postgresql+psycopg://postgres:postgres@localhost:5432/enterprise_rag"
     )
     conversation_store_backend: str = os.getenv("CONVERSATION_STORE_BACKEND", "dynamodb").lower()
+    semantic_cache_backend: str = os.getenv("SEMANTIC_CACHE_BACKEND", "memory").lower()
 
 
 settings = Settings()

@@ -175,7 +175,7 @@ Depends on: Module 0.
 
 **Goal:** Provide transactional workflow state and distributed ephemeral state.
 
-**Status:** Phases 4A and 4B implemented on the feature branch: SQLAlchemy/Alembic foundation, tenant-aware schema, repository contract, DynamoDB adapter, PostgreSQL conversation adapter and an explicit backend feature flag are present. DynamoDB remains the default. Redis cache/session migration, backfill and controlled cutover remain in phases 4C–4D.
+**Status:** Phases 4A–4C implemented on the feature branch: SQLAlchemy/Alembic foundation, tenant-aware schema, repository contract, DynamoDB and PostgreSQL conversation adapters, explicit backend feature flags, and a shared tenant-isolated Redis semantic cache are present. DynamoDB and the in-memory semantic cache remain the safe defaults. Data backfill and controlled production cutover remain in phase 4D.
 
 Create:
 

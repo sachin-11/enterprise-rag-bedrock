@@ -9,6 +9,7 @@ from functools import lru_cache
 from typing import Protocol, Sequence
 
 from app.core.config import settings
+from app.core.redis import get_redis_client
 
 
 class RedisRateLimitBackend(Protocol):
@@ -94,14 +95,4 @@ class RateLimitService:
 
 @lru_cache
 def get_rate_limit_service() -> RateLimitService:
-    # Imported lazily so rate limiting can remain explicitly disabled in
-    # local/test environments without requiring a running Redis server.
-    from redis import Redis
-
-    backend = Redis.from_url(
-        settings.redis_url,
-        socket_connect_timeout=settings.redis_connect_timeout_seconds,
-        socket_timeout=settings.redis_socket_timeout_seconds,
-        decode_responses=False,
-    )
-    return RateLimitService(backend, settings.rate_limit_window_seconds)
+    return RateLimitService(get_redis_client(), settings.rate_limit_window_seconds)

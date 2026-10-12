@@ -123,7 +123,7 @@ docker compose up --build
 | `DYNAMODB_CONVERSATIONS_TABLE`, `DYNAMODB_MESSAGES_TABLE` | Per-user chat history (conversations are private; documents are shared per-org) |
 | `DATABASE_URL`, `CONVERSATION_STORE_BACKEND` | PostgreSQL connection and explicit conversation repository selection; defaults to `dynamodb` during migration |
 | `LANGCHAIN_TRACING_V2`, `LANGCHAIN_API_KEY`, `LANGCHAIN_PROJECT` | LangSmith tracing — blank/`false` makes every `@traceable` call a no-op |
-| `REDIS_URL`, `RATE_LIMIT_ENABLED` | Shared Redis backend and explicit switch for distributed API rate limiting |
+| `REDIS_URL`, `RATE_LIMIT_ENABLED`, `SEMANTIC_CACHE_BACKEND` | Shared Redis backend, distributed API rate limiting, and semantic-cache backend (`memory` or `redis`) |
 | `RATE_LIMIT_WINDOW_SECONDS`, `TENANT_REQUESTS_PER_WINDOW`, `USER_REQUESTS_PER_WINDOW` | Authenticated tenant/user fixed-window limits |
 | `AUTH_IP_REQUESTS_PER_WINDOW`, `TRUSTED_PROXY_CIDRS` | Authentication abuse limit and proxies allowed to supply `X-Forwarded-For` |
 | `INVITE_SIGNING_KEY` | Random secret (`python -c "import secrets; print(secrets.token_hex(32))"`) signing invite tokens |
@@ -135,6 +135,11 @@ endpoints use a separate client-IP bucket. Limit responses return `429` with
 `Retry-After`; an unavailable Redis backend returns `503` instead of silently
 bypassing protection. `X-Forwarded-For` is honored only for peers listed in
 `TRUSTED_PROXY_CIDRS`.
+
+The semantic cache defaults to process-local `memory` during migration. Set
+`SEMANTIC_CACHE_BACKEND=redis` for shared, tenant-isolated cache entries across
+backend instances. Cache failures fail open and continue without a cached
+answer; authorization and rate limiting retain their stricter behavior.
 
 ## Retrieval architecture
 
