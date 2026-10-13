@@ -100,7 +100,7 @@ class _FakeAstream:
 def _mock_pipeline(monkeypatch):
     monkeypatch.setattr("app.api.chat.rewrite_query", lambda query, chat_history, history_summary="": query)
     monkeypatch.setattr("app.api.chat.generate_hyde_passage", lambda query: f"Hypothetical answer about {query}")
-    monkeypatch.setattr("app.api.chat.retrieve_from_kb", _fake_retrieve_from_kb)
+    monkeypatch.setattr("app.services.retrieval.gateway.retrieve_from_kb", _fake_retrieve_from_kb)
     monkeypatch.setattr("app.api.chat.rerank_with_cohere", _fake_rerank)
     monkeypatch.setattr(
         "app.services.retrieval.authorizer._current_acl",
@@ -190,7 +190,7 @@ def test_unauthorized_chunks_are_removed_before_reranking(monkeypatch):
         metadata={"tenant_id": "tenant-a", "uploaded_by": "someone-else"},
     )
     monkeypatch.setattr(
-        "app.api.chat.retrieve_from_kb",
+        "app.services.retrieval.gateway.retrieve_from_kb",
         lambda *args, **kwargs: [unauthorized, unshared, FAKE_KB["tenant-a"][0]],
     )
 
@@ -235,7 +235,7 @@ def test_revoked_share_is_excluded_before_reranking(monkeypatch):
         metadata={"tenant_id": "tenant-a", "uploaded_by": "other-user", "shared_with": ["test-user"]},
         s3_uri="s3://test-bucket/tenant-a/doc-revoked/revoked.pdf",
     )
-    monkeypatch.setattr("app.api.chat.retrieve_from_kb", lambda *args, **kwargs: [stale_index_result])
+    monkeypatch.setattr("app.services.retrieval.gateway.retrieve_from_kb", lambda *args, **kwargs: [stale_index_result])
     monkeypatch.setattr(
         "app.services.retrieval.authorizer._current_acl",
         lambda key: {"tenant_id": "tenant-a", "uploaded_by": "other-user", "shared_with": []},
@@ -282,7 +282,7 @@ def test_hyde_failure_falls_back_to_standalone_query_as_retrieval_text(monkeypat
         captured["query_text"] = query_text
         return []
 
-    monkeypatch.setattr("app.api.chat.retrieve_from_kb", _capture_retrieve)
+    monkeypatch.setattr("app.services.retrieval.gateway.retrieve_from_kb", _capture_retrieve)
 
     response = client.post("/chat/query", json={"query": "What was Q1 revenue?"})
 

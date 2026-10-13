@@ -19,7 +19,7 @@ Legend: **Available** = usable implementation exists, **Partial** = foundation e
 | Multi-tenant isolation | Available | Tenant comes from verified token; Bedrock KB retrieval applies tenant metadata filter. |
 | Document ACL | Available | Admin/member filtering uses `uploaded_by` and `shared_with`; document sharing endpoints exist. |
 | Chat orchestration router | Partial | RAG pipeline exists, but there is no explicit direct-generation/RAG/business-tool intent router. |
-| Hybrid retrieval | Partial | Bedrock KB requests hybrid search when supported; standalone dense + BM25 + RRF code exists but is not the active chat path. |
+| Hybrid retrieval | Partial | The active KB is managed and its search mode has not been verified as HYBRID; standalone dense + BM25 + RRF code is not the active chat path. |
 | Reranking | Available | Cohere reranking and relevance threshold are in the active RAG pipeline. |
 | Business tool calling | Missing | Admin copilot has narrow internal actions, but end-user typed tools such as leave balance or IT tickets do not exist. |
 | Backend tool authorization | Missing | There is no shared tool registry/policy engine for operational tools. |
@@ -209,7 +209,7 @@ Depends on: Module 0. Start early; later modules build on it.
 
 **Goal:** Make hybrid retrieval and document ACL behavior explicit and testable.
 
-**Status:** The production Bedrock chat path checks tenant and document ACL metadata, then rechecks the current S3 document sidecar before reranking or prompt construction. Revoked shares and failed sidecar reads discard the chunk and emit an audit warning. Member semantic-cache hits are disabled until cached evidence can be reauthorized. The deployed Bedrock search mode and standalone hybrid-path consolidation remain to be completed.
+**Status:** The active retrieval gateway uses the verified `MANAGED` Bedrock KB and a trusted `RequestContext`. It checks indexed tenant/document metadata and current S3 sidecars before reranking. Revoked shares and failed sidecar reads discard the chunk and emit an audit warning. Member semantic-cache hits are disabled until cached evidence can be reauthorized. HYBRID behavior is not verified; the separate OpenSearch path remains experimental.
 
 Create/change:
 

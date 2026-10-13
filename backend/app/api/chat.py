@@ -19,7 +19,7 @@ from app.models.orchestration import OrchestratorInput, RouteType
 from app.models.chat import ChatQueryRequest, FeedbackRequest, SourceCitation
 from app.models.user import MessageResponse
 from app.services import cache_service, error_watchdog_service
-from app.services.bedrock_kb_service import BedrockKBError, KBRetrievalResult, retrieve_from_kb
+from app.services.bedrock_kb_service import BedrockKBError, KBRetrievalResult
 from app.services.conversation_repository import (
     append_message,
     create_conversation,
@@ -35,7 +35,8 @@ from app.services.pii_service import redact_pii
 from app.services.orchestrator_service import plan_request
 from app.services.query_service import MAX_HISTORY_TURNS, generate_hyde_passage, rewrite_query, summarize_history
 from app.services.retrieval_service import embed_text, rerank_with_cohere
-from app.services.retrieval.authorizer import filter_authorized_results, filter_current_document_acl
+from app.services.retrieval.authorizer import filter_authorized_results
+from app.services.retrieval.gateway import retrieve_authorized_evidence
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 logger = logging.getLogger(__name__)
@@ -227,33 +228,17 @@ async def _run_rag_pipeline(
     hyde_passage = await run_in_threadpool(generate_hyde_passage, standalone_query)
     retrieval_query_text = hyde_passage or standalone_query
 
-    # SECURITY / tenant isolation boundary: retrieve_from_kb applies a
-    # metadata filter on tenant_id (and, for non-admins, on uploaded_by/
-    # shared_with too — see bedrock_kb_service.py's _build_retrieval_filter)
-    # against Bedrock KB's managed vector store. This filter — backed by the
-    # `<key>.metadata.json` sidecar written at upload time — is the *only*
-    # thing standing between tenants sharing one Knowledge Base and one
-    # tenant reading another tenant's documents (or one member reading a
-    # document not shared with them); it must never be dropped, made
-    # optional, or derived from anything but the tenant_id/user_id/is_admin
-    # passed in by the caller, which come from a verified Cognito IdToken
-    # (get_current_user) — never a client-suppliable value.
+    # The gateway scopes the Bedrock query using trusted RequestContext,
+    # filters returned metadata, and rechecks the current S3 sidecar. The
+    # last check catches revoked shares before the next KB ingestion sync.
     try:
         retrieved = await run_in_threadpool(
-            retrieve_from_kb,
-            retrieval_query_text,
-            kb_id,
-            context.tenant_id,
-            context.user_id,
-            context.is_admin,
-            RETRIEVE_TOP_K,
+            retrieve_authorized_evidence, retrieval_query_text, kb_id, context, RETRIEVE_TOP_K
         )
     except BedrockKBError as exc:
         yield "error", f"Failed to retrieve context: {exc}"
         return
 
-    retrieved = filter_authorized_results(retrieved, context)
-    retrieved = await run_in_threadpool(filter_current_document_acl, retrieved, context)
     reranked = await run_in_threadpool(rerank_with_cohere, standalone_query, retrieved, RERANK_TOP_N)
     reranked = filter_authorized_results(reranked, context)
     # Drop anything the reranker itself scored as not actually relevant —

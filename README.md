@@ -143,7 +143,7 @@ answer; authorization and rate limiting retain their stricter behavior.
 
 ## Retrieval architecture
 
-`/chat/query` retrieves context from the **Bedrock Knowledge Base** (`retrieve_from_kb` in `bedrock_kb_service.py`); chunking, embedding, and indexing happen inside Bedrock when you call `POST /documents/sync-kb`. See [Retrieval isolation](#retrieval-isolation-tenant--per-document-sharing) above for exactly how tenant and sharing scoping works.
+`/chat/query` retrieves context through the authorized retrieval gateway backed by the **Bedrock Knowledge Base** (`retrieve_from_kb` in `bedrock_kb_service.py`); chunking, embedding, and indexing happen inside Bedrock when you call `POST /documents/sync-kb`. The configured KB reported `ACTIVE` and `MANAGED` in a read-only check on 13 October 2026. See [Retrieval isolation](#retrieval-isolation-tenant--per-document-sharing) above for tenant and sharing scoping.
 
 The chat path checks the returned chunks' tenant and document sharing metadata
 again, then reads the current S3 sidecar before reranking or building a prompt.
