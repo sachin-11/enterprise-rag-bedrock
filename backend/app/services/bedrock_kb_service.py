@@ -31,6 +31,7 @@ class KBRetrievalResult:
     score: float
     doc_name: str
     metadata: dict[str, Any] = field(default_factory=dict)
+    s3_uri: str = ""
 
 
 class BedrockKBError(Exception):
@@ -254,6 +255,7 @@ def retrieve_from_kb(
                 score=result.get("score") or 0.0,
                 doc_name=doc_name,
                 metadata=metadata,
+                s3_uri=s3_uri,
             )
         )
     return results

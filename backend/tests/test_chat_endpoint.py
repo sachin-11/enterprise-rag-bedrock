@@ -33,6 +33,7 @@ FAKE_KB = {
             score=0.95,
             doc_name="acme-q1-report.pdf",
             metadata={"tenant_id": "tenant-a", "uploaded_by": "test-user"},
+            s3_uri="s3://test-bucket/tenant-a/doc-1/acme-q1-report.pdf",
         )
     ],
     "tenant-b": [
@@ -42,6 +43,7 @@ FAKE_KB = {
             score=0.95,
             doc_name="globex-q1-report.pdf",
             metadata={"tenant_id": "tenant-b", "uploaded_by": "test-user"},
+            s3_uri="s3://test-bucket/tenant-b/doc-1/globex-q1-report.pdf",
         )
     ],
 }
@@ -100,6 +102,10 @@ def _mock_pipeline(monkeypatch):
     monkeypatch.setattr("app.api.chat.generate_hyde_passage", lambda query: f"Hypothetical answer about {query}")
     monkeypatch.setattr("app.api.chat.retrieve_from_kb", _fake_retrieve_from_kb)
     monkeypatch.setattr("app.api.chat.rerank_with_cohere", _fake_rerank)
+    monkeypatch.setattr(
+        "app.services.retrieval.authorizer._current_acl",
+        lambda key: {"tenant_id": key.split("/")[0], "uploaded_by": "test-user", "shared_with": []},
+    )
 
     # No real OpenAI embedding calls in tests, and every test deterministically
     # exercises the full pipeline rather than depending on cache state left
@@ -217,6 +223,31 @@ def test_member_answer_does_not_use_stale_semantic_cache(monkeypatch):
 
     assert response.status_code == 200
     assert any(event["type"] == "sources" for event in _parse_sse(response.text))
+
+
+def test_revoked_share_is_excluded_before_reranking(monkeypatch):
+    _as_user("tenant-a")
+    stale_index_result = KBRetrievalResult(
+        chunk_id="revoked",
+        text="REVOKED SECRET",
+        score=0.99,
+        doc_name="revoked.pdf",
+        metadata={"tenant_id": "tenant-a", "uploaded_by": "other-user", "shared_with": ["test-user"]},
+        s3_uri="s3://test-bucket/tenant-a/doc-revoked/revoked.pdf",
+    )
+    monkeypatch.setattr("app.api.chat.retrieve_from_kb", lambda *args, **kwargs: [stale_index_result])
+    monkeypatch.setattr(
+        "app.services.retrieval.authorizer._current_acl",
+        lambda key: {"tenant_id": "tenant-a", "uploaded_by": "other-user", "shared_with": []},
+    )
+
+    response = client.post("/chat/query", json={"query": "What is in the revoked document?"})
+    events = _parse_sse(response.text)
+    sources = next(event["sources"] for event in events if event["type"] == "sources")
+
+    assert response.status_code == 200
+    assert sources == []
+    assert "REVOKED SECRET" not in response.text
 
 
 def test_missing_session_cookie_returns_401():

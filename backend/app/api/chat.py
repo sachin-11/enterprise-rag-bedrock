@@ -35,7 +35,7 @@ from app.services.pii_service import redact_pii
 from app.services.orchestrator_service import plan_request
 from app.services.query_service import MAX_HISTORY_TURNS, generate_hyde_passage, rewrite_query, summarize_history
 from app.services.retrieval_service import embed_text, rerank_with_cohere
-from app.services.retrieval.authorizer import filter_authorized_results
+from app.services.retrieval.authorizer import filter_authorized_results, filter_current_document_acl
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 logger = logging.getLogger(__name__)
@@ -253,6 +253,7 @@ async def _run_rag_pipeline(
         return
 
     retrieved = filter_authorized_results(retrieved, context)
+    retrieved = await run_in_threadpool(filter_current_document_acl, retrieved, context)
     reranked = await run_in_threadpool(rerank_with_cohere, standalone_query, retrieved, RERANK_TOP_N)
     reranked = filter_authorized_results(reranked, context)
     # Drop anything the reranker itself scored as not actually relevant —

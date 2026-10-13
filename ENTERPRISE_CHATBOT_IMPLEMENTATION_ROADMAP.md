@@ -209,7 +209,7 @@ Depends on: Module 0. Start early; later modules build on it.
 
 **Goal:** Make hybrid retrieval and document ACL behavior explicit and testable.
 
-**Status:** Post-retrieval tenant and document ACL checks are wired into the production Bedrock chat path, with audit warnings and adversarial tests. Member semantic-cache hits are disabled until cached evidence can be reauthorized after share changes. The deployed Bedrock search mode, standalone hybrid-path consolidation, and current-source ACL checks remain to be completed.
+**Status:** The production Bedrock chat path checks tenant and document ACL metadata, then rechecks the current S3 document sidecar before reranking or prompt construction. Revoked shares and failed sidecar reads discard the chunk and emit an audit warning. Member semantic-cache hits are disabled until cached evidence can be reauthorized. The deployed Bedrock search mode and standalone hybrid-path consolidation remain to be completed.
 
 Create/change:
 

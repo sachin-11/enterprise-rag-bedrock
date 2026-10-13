@@ -1,8 +1,10 @@
 import logging
+import io
+import json
 
 from app.models.context import ChannelType, CorrelationMetadata, RequestContext, Role
 from app.services.bedrock_kb_service import KBRetrievalResult
-from app.services.retrieval.authorizer import filter_authorized_results
+from app.services.retrieval.authorizer import _current_acl, filter_authorized_results, filter_current_document_acl
 
 
 def _context(tenant: str, user: str, role: Role = Role.MEMBER) -> RequestContext:
@@ -48,3 +50,53 @@ def test_admin_still_cannot_read_other_tenant():
     authorized = filter_authorized_results(chunks, _context("a", "admin", Role.ADMIN))
 
     assert [result.chunk_id for result in authorized] == ["same-tenant"]
+
+
+def test_current_acl_rejects_missing_uri_and_source_read_failure(monkeypatch):
+    monkeypatch.setattr("app.services.retrieval.authorizer.settings.s3_bucket_name", "test-bucket")
+
+    def _failed_read(key):
+        raise RuntimeError("S3 unavailable")
+
+    monkeypatch.setattr("app.services.retrieval.authorizer._current_acl", _failed_read)
+    chunks = [
+        _chunk("missing-uri", {"tenant_id": "a", "uploaded_by": "alice"}),
+        KBRetrievalResult(
+            "read-failed", "text", 0.9, "doc.pdf",
+            {"tenant_id": "a", "uploaded_by": "alice"},
+            "s3://test-bucket/a/doc-1/doc.pdf",
+        ),
+    ]
+
+    assert filter_current_document_acl(chunks, _context("a", "alice")) == []
+
+
+def test_current_acl_reads_only_the_expected_tenant_sidecar(monkeypatch):
+    monkeypatch.setattr("app.services.retrieval.authorizer.settings.s3_bucket_name", "test-bucket")
+    calls = []
+
+    class FakeS3:
+        def get_object(self, **kwargs):
+            calls.append(kwargs)
+            body = {
+                "metadataAttributes": {
+                    "tenant_id": {"value": {"stringValue": "a"}},
+                    "uploaded_by": {"value": {"stringValue": "bob"}},
+                    "shared_with": {"value": {"stringListValue": ["alice"]}},
+                }
+            }
+            return {"Body": io.BytesIO(json.dumps(body).encode())}
+
+    monkeypatch.setattr("app.services.retrieval.authorizer.get_s3_client", FakeS3)
+    allowed = KBRetrievalResult(
+        "allowed", "text", 0.9, "doc.pdf", {"tenant_id": "a", "shared_with": ["alice"]},
+        "s3://test-bucket/a/doc-1/doc.pdf",
+    )
+    foreign_uri = KBRetrievalResult(
+        "foreign", "text", 0.9, "doc.pdf", {"tenant_id": "a", "shared_with": ["alice"]},
+        "s3://test-bucket/b/doc-1/doc.pdf",
+    )
+
+    assert filter_current_document_acl([allowed, foreign_uri], _context("a", "alice")) == [allowed]
+    assert calls == [{"Bucket": "test-bucket", "Key": "a/doc-1/doc.pdf.metadata.json"}]
+    assert _current_acl("a/doc-1/doc.pdf.metadata.json")["shared_with"] == ["alice"]
