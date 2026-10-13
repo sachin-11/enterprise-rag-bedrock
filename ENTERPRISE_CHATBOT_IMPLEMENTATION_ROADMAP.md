@@ -239,6 +239,8 @@ Depends on: Modules 0 and 4.
 
 **Goal:** Safely support operations such as leave balance and IT tickets.
 
+**Status:** Foundation implemented on the feature branch: strict argument/result models, allow-listed registry, deterministic role policy, audited read executor with bounded timeout/retries, and a self-only leave-balance tool definition. No HR connector is configured or exposed through chat yet. Write execution remains disabled until Module 7 confirmation and idempotency are built.
+
 Create:
 
 - `backend/app/tools/base.py`: typed input/output, risk level and required permission.

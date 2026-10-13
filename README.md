@@ -156,6 +156,12 @@ verification before calling this production path hybrid retrieval.
 
 The codebase also has a **standalone hybrid retrieval path** (`chunking_service.py` → `ingestion_service.py` → `retrieval_service.py`: dense + BM25 + RRF fusion against a self-managed OpenSearch index, via `POST /documents/{id}/ingest`) that isn't currently wired into `/chat/query` — kept as an alternative if you provision a real OpenSearch domain/collection later.
 
+The business-tool foundation has strict typed inputs, an allow-listed registry,
+backend role checks, audit events, and bounded execution for read tools. The
+leave-balance definition accepts no actor or tenant arguments; a future HR
+connector receives both from verified request context. No business connector
+is enabled in chat yet, and write tools require the pending-action workflow.
+
 ## API reference
 
 ### Auth (`/auth`)
