@@ -36,3 +36,12 @@ def test_get_chat_llm_builds_bedrock_converse(monkeypatch):
 
 class _FakeClient:
     meta = type("Meta", (), {"region_name": "us-east-1"})()
+
+
+def test_get_chat_llm_provider_override_beats_setting(monkeypatch):
+    monkeypatch.setattr(settings, "llm_provider", "bedrock")
+    monkeypatch.setattr(settings, "openai_api_key", "test-key")
+
+    model = llm.get_chat_llm("fast", temperature=0.0, provider="openai")
+
+    assert type(model).__name__ == "ChatOpenAI"

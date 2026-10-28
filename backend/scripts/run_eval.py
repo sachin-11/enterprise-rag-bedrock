@@ -6,9 +6,11 @@ relevancy, context precision, context recall). Prints a per-question
 summary table plus overall averages, and saves full results to
 eval/results_{timestamp}.json.
 
-The judge LLM/embeddings for ragas are OpenAI, matching the rest of this
-project's /chat/query pipeline (see app/api/chat.py), instead of ragas'
-default model choices.
+The judge LLM/embeddings for ragas default to OpenAI and stay fixed
+(--judge-provider) no matter which LLM_PROVIDER / EMBEDDING_PROVIDER /
+RERANK_PROVIDER the server under test runs, so scores from an OpenAI run and
+a Bedrock run are judged by the same model and can be compared. Pass --label
+to tag a run (e.g. "openai" / "bedrock"); it is saved next to the results.
 
 Prerequisites:
   - The FastAPI server is already running (`uvicorn app.main:app`).
@@ -20,6 +22,10 @@ Prerequisites:
 Usage:
     poetry run python scripts/run_eval.py
     poetry run python scripts/run_eval.py --base-url http://localhost:8000 --tenant-id eval-tenant
+
+A/B a provider change: start the server with the old settings, run with
+--label openai; restart it with LLM_PROVIDER=bedrock (etc.), run with
+--label bedrock; compare the two overall-averages tables.
 """
 
 from __future__ import annotations
@@ -95,27 +101,40 @@ def collect_eval_rows(test_set: list[dict[str, Any]], base_url: str, tenant_id: 
     return rows
 
 
-def run_ragas_evaluation(rows: list[dict[str, Any]]):
+def _build_judge_embeddings(provider: str):
+    from app.core.config import settings
+
+    if provider == "bedrock":
+        from langchain_aws import BedrockEmbeddings
+
+        from app.core.aws_clients import get_bedrock_runtime_client
+
+        return BedrockEmbeddings(
+            client=get_bedrock_runtime_client(), model_id=settings.bedrock_embedding_model_id
+        )
+
+    from langchain_openai import OpenAIEmbeddings
+
+    from app.services.retrieval_service import EMBEDDING_MODEL_ID
+
+    return OpenAIEmbeddings(api_key=settings.openai_api_key, model=EMBEDDING_MODEL_ID)
+
+
+def run_ragas_evaluation(rows: list[dict[str, Any]], judge_provider: str = "openai"):
     # Imported lazily: these are heavy, optional deps (see the `eval` poetry
     # group) not needed just to load the test set or parse CLI args.
     from datasets import Dataset
-    from langchain_openai import ChatOpenAI, OpenAIEmbeddings
     from ragas import evaluate
     from ragas.embeddings import LangchainEmbeddingsWrapper
     from ragas.llms import LangchainLLMWrapper
     from ragas.metrics import answer_relevancy, context_precision, context_recall, faithfulness
 
-    # gpt-5.5 (app.api.chat.OPENAI_ANSWER_MODEL_ID) only accepts the default
-    # temperature — ragas' judge calls need to set their own, so we reuse
-    # query_service's model instead, which supports arbitrary temperatures.
-    from app.core.config import settings
-    from app.services.query_service import OPENAI_MODEL_ID as JUDGE_MODEL_ID
-    from app.services.retrieval_service import EMBEDDING_MODEL_ID
+    # The "fast" tier supports arbitrary temperatures, which ragas' judge
+    # calls need to set.
+    from app.core.llm import get_chat_llm
 
-    judge_llm = LangchainLLMWrapper(ChatOpenAI(api_key=settings.openai_api_key, model=JUDGE_MODEL_ID))
-    judge_embeddings = LangchainEmbeddingsWrapper(
-        OpenAIEmbeddings(api_key=settings.openai_api_key, model=EMBEDDING_MODEL_ID)
-    )
+    judge_llm = LangchainLLMWrapper(get_chat_llm("fast", temperature=0.0, provider=judge_provider))
+    judge_embeddings = LangchainEmbeddingsWrapper(_build_judge_embeddings(judge_provider))
 
     dataset = Dataset.from_dict(
         {
@@ -149,11 +168,16 @@ def print_summary(result_df) -> None:
         print(f"{col:20s}: {result_df[col].mean():.3f}")
 
 
-def save_results(result_df, output_dir: Path) -> Path:
+def save_results(result_df, output_dir: Path, label: str = "", judge_provider: str = "openai") -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     output_path = output_dir / f"results_{timestamp}.json"
     result_df.to_json(output_path, orient="records", indent=2, force_ascii=False)
+    # Sidecar, not part of results_*.json: app/services/eval_service.py only
+    # reads files matching that exact name and ignores this one.
+    meta_path = output_dir / f"results_{timestamp}.meta.json"
+    meta = {"label": label, "judge_provider": judge_provider, "ran_at": timestamp}
+    meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
     return output_path
 
 
@@ -162,6 +186,13 @@ def main() -> None:
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL, help="Base URL of the running FastAPI server")
     parser.add_argument("--tenant-id", default=DEFAULT_TENANT_ID, help="X-Tenant-ID to query under")
     parser.add_argument("--test-set", type=Path, default=DEFAULT_TEST_QA_PATH, help="Path to the test_qa.json file")
+    parser.add_argument("--label", default="", help="Tag for this run, e.g. the provider setting under test")
+    parser.add_argument(
+        "--judge-provider",
+        choices=["openai", "bedrock"],
+        default="openai",
+        help="Provider for the ragas judge LLM/embeddings; keep it the same across runs you compare",
+    )
     args = parser.parse_args()
 
     test_set = load_test_set(args.test_set)
@@ -169,13 +200,13 @@ def main() -> None:
 
     rows = collect_eval_rows(test_set, args.base_url, args.tenant_id)
 
-    print("\nRunning ragas evaluation (this calls Bedrock as the judge LLM)...")
-    result = run_ragas_evaluation(rows)
+    print("\nRunning ragas evaluation (judge provider: {args.judge_provider})...")
+    result = run_ragas_evaluation(rows, args.judge_provider)
     result_df = result.to_pandas()
 
     print_summary(result_df)
 
-    output_path = save_results(result_df, RESULTS_DIR)
+    output_path = save_results(result_df, RESULTS_DIR, args.label, args.judge_provider)
     print(f"\nSaved full results to {output_path}")
 
 

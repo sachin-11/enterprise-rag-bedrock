@@ -19,15 +19,26 @@ LLMRole = Literal["fast", "answer"]
 OPENAI_MODEL_IDS: dict[LLMRole, str] = {"fast": "gpt-5.4-mini", "answer": "gpt-5.4-mini"}
 
 
-def _model_id(role: LLMRole) -> str:
-    if settings.llm_provider == "bedrock":
+def _model_id(role: LLMRole, provider: str) -> str:
+    if provider == "bedrock":
         return settings.bedrock_answer_model_id if role == "answer" else settings.bedrock_fast_model_id
     return OPENAI_MODEL_IDS[role]
 
 
-def get_chat_llm(role: LLMRole, *, temperature: float, max_tokens: Optional[int] = None) -> BaseChatModel:
-    """Build a chat model for `role`. Callers are expected to cache the result."""
-    if settings.llm_provider == "bedrock":
+def get_chat_llm(
+    role: LLMRole,
+    *,
+    temperature: float,
+    max_tokens: Optional[int] = None,
+    provider: Optional[str] = None,
+) -> BaseChatModel:
+    """Build a chat model for `role`. Callers are expected to cache the result.
+
+    `provider` overrides LLM_PROVIDER — used by the eval script to keep its
+    judge model fixed while the app under test switches providers.
+    """
+    provider = provider or settings.llm_provider
+    if provider == "bedrock":
         from langchain_aws import ChatBedrockConverse
 
         from app.core.aws_clients import get_bedrock_runtime_client
@@ -36,7 +47,7 @@ def get_chat_llm(role: LLMRole, *, temperature: float, max_tokens: Optional[int]
         # connection pooling match the guardrail calls.
         return ChatBedrockConverse(
             client=get_bedrock_runtime_client(),
-            model_id=_model_id(role),
+            model_id=_model_id(role, provider),
             region_name=settings.aws_region or None,
             temperature=temperature,
             max_tokens=max_tokens,
@@ -46,7 +57,7 @@ def get_chat_llm(role: LLMRole, *, temperature: float, max_tokens: Optional[int]
 
     return ChatOpenAI(
         api_key=settings.openai_api_key,
-        model=_model_id(role),
+        model=_model_id(role, provider),
         temperature=temperature,
         max_tokens=max_tokens,
     )
