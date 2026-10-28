@@ -25,6 +25,8 @@ logger = logging.getLogger(__name__)
 
 GuardrailSource = Literal["INPUT", "OUTPUT"]
 
+FAIL_CLOSED_MESSAGE = "Content screening is temporarily unavailable, so this request could not be processed."
+
 
 @dataclass
 class GuardrailResult:
@@ -38,9 +40,9 @@ class GuardrailResult:
 def check_content(text: str, source: GuardrailSource) -> GuardrailResult:
     """Screen `text` with the configured Bedrock Guardrail.
 
-    Fails open (reports no intervention) on any AWS error, since a guardrail
-    outage should degrade to "unfiltered" rather than take the whole chat
-    endpoint down — this is a defense-in-depth layer, not the only one.
+    On any AWS error, behavior follows GUARDRAIL_FAIL_MODE: "open" (default)
+    reports no intervention, so a guardrail outage degrades to "unfiltered"
+    rather than taking the chat endpoint down; "closed" blocks the text.
     """
     if not settings.bedrock_guardrail_id:
         return GuardrailResult(intervened=False, output_text=text)
@@ -54,6 +56,9 @@ def check_content(text: str, source: GuardrailSource) -> GuardrailResult:
             content=[{"text": {"text": text}}],
         )
     except (ClientError, BotoCoreError) as exc:
+        if settings.guardrail_fail_mode == "closed":
+            logger.error("Bedrock Guardrail check failed (%s), failing closed: %s", source, exc)
+            return GuardrailResult(intervened=True, output_text=FAIL_CLOSED_MESSAGE)
         logger.error("Bedrock Guardrail check failed (%s), failing open: %s", source, exc)
         return GuardrailResult(intervened=False, output_text=text)
 

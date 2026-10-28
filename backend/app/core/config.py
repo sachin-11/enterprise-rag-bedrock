@@ -36,6 +36,12 @@ class Settings(BaseModel):
     bedrock_rerank_model_id: str = os.getenv("BEDROCK_RERANK_MODEL_ID", "amazon.rerank-v1:0")
     bedrock_guardrail_id: str = os.getenv("BEDROCK_GUARDRAIL_ID", "")
     bedrock_guardrail_version: str = os.getenv("BEDROCK_GUARDRAIL_VERSION", "DRAFT")
+    # "open" (default): an AWS error while screening lets the text through.
+    # "closed": an AWS error blocks it — safer for regulated deployments, at
+    # the cost of chat going down when Bedrock Guardrails is unreachable.
+    guardrail_fail_mode: str = os.getenv("GUARDRAIL_FAIL_MODE", "open").lower()
+    # When true the app refuses to start without BEDROCK_GUARDRAIL_ID.
+    guardrail_required: bool = os.getenv("GUARDRAIL_REQUIRED", "false").lower() == "true"
     cognito_user_pool_id: str = os.getenv("COGNITO_USER_POOL_ID", "")
     cognito_app_client_id: str = os.getenv("COGNITO_APP_CLIENT_ID", "")
     cognito_app_client_secret: str = os.getenv("COGNITO_APP_CLIENT_SECRET", "")

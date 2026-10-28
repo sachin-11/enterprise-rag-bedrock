@@ -32,6 +32,8 @@ async def _lifespan(app: FastAPI):
     # docstring), so a production deploy that forgot to set this would run
     # with the INPUT/OUTPUT guardrail checks quietly doing nothing — loud at
     # startup, not silent, is the point here.
+    if settings.guardrail_required and not settings.bedrock_guardrail_id:
+        raise RuntimeError("GUARDRAIL_REQUIRED is true but BEDROCK_GUARDRAIL_ID is not set.")
     if not settings.bedrock_guardrail_id:
         logger.warning(
             "BEDROCK_GUARDRAIL_ID is not set — chat requests will run without "
