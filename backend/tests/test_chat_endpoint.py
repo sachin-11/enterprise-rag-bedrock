@@ -101,7 +101,7 @@ def _mock_pipeline(monkeypatch):
     monkeypatch.setattr("app.api.chat.rewrite_query", lambda query, chat_history, history_summary="": query)
     monkeypatch.setattr("app.api.chat.generate_hyde_passage", lambda query: f"Hypothetical answer about {query}")
     monkeypatch.setattr("app.services.retrieval.gateway.retrieve_from_kb", _fake_retrieve_from_kb)
-    monkeypatch.setattr("app.api.chat.rerank_with_cohere", _fake_rerank)
+    monkeypatch.setattr("app.api.chat.rerank_candidates", _fake_rerank)
     monkeypatch.setattr(
         "app.services.retrieval.authorizer._current_acl",
         lambda key: {"tenant_id": key.split("/")[0], "uploaded_by": "test-user", "shared_with": []},
@@ -198,7 +198,7 @@ def test_unauthorized_chunks_are_removed_before_reranking(monkeypatch):
         seen["rerank_ids"] = [candidate.chunk_id for candidate in candidates]
         return candidates
 
-    monkeypatch.setattr("app.api.chat.rerank_with_cohere", _rerank)
+    monkeypatch.setattr("app.api.chat.rerank_candidates", _rerank)
     response = client.post("/chat/query", json={"query": "What was Q1 revenue?"})
     events = _parse_sse(response.text)
     sources = next(event["sources"] for event in events if event["type"] == "sources")

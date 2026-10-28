@@ -4,6 +4,8 @@ from unittest.mock import MagicMock
 from app.services.retrieval_service import (
     RetrievalResult,
     reciprocal_rank_fusion,
+    rerank_candidates,
+    rerank_with_bedrock,
     rerank_with_cohere,
     retrieve_dense,
     retrieve_sparse,
@@ -138,3 +140,56 @@ def test_rerank_with_cohere_handles_empty_candidates(monkeypatch):
 
     assert result == []
     mock_cohere_client.rerank.assert_not_called()
+
+
+def test_rerank_with_bedrock_reorders_and_truncates(monkeypatch):
+    candidates = [
+        RetrievalResult(doc_id="1", score=0.1, text="irrelevant passage"),
+        RetrievalResult(doc_id="2", score=0.1, text="highly relevant passage"),
+        RetrievalResult(doc_id="3", score=0.1, text="somewhat relevant passage"),
+    ]
+    mock_client = MagicMock()
+    mock_client.rerank.return_value = {
+        "results": [{"index": 1, "relevanceScore": 0.95}, {"index": 2, "relevanceScore": 0.60}]
+    }
+    monkeypatch.setattr("app.services.retrieval_service.get_bedrock_rerank_client", lambda: mock_client)
+
+    result = rerank_with_bedrock("find the relevant passage", candidates, top_n=2)
+
+    assert [r.doc_id for r in result] == ["2", "3"]
+    assert result[0].score == 0.95
+
+    _, kwargs = mock_client.rerank.call_args
+    assert kwargs["queries"][0]["textQuery"]["text"] == "find the relevant passage"
+    assert [src["inlineDocumentSource"]["textDocument"]["text"] for src in kwargs["sources"]] == [
+        c.text for c in candidates
+    ]
+    config = kwargs["rerankingConfiguration"]["bedrockRerankingConfiguration"]
+    assert config["numberOfResults"] == 2
+    assert config["modelConfiguration"]["modelArn"].endswith("::foundation-model/amazon.rerank-v1:0")
+
+
+def test_rerank_with_bedrock_falls_back_on_failure(monkeypatch):
+    candidates = [RetrievalResult(doc_id=str(i), score=0.9 - i / 10, text=str(i)) for i in range(3)]
+    mock_client = MagicMock()
+    mock_client.rerank.side_effect = RuntimeError("Bedrock unavailable")
+    monkeypatch.setattr("app.services.retrieval_service.get_bedrock_rerank_client", lambda: mock_client)
+
+    assert rerank_with_bedrock("query", candidates, top_n=2) == candidates[:2]
+
+
+def test_rerank_candidates_dispatches_on_provider(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "app.services.retrieval_service.rerank_with_bedrock", lambda *a: calls.append("bedrock") or []
+    )
+    monkeypatch.setattr(
+        "app.services.retrieval_service.rerank_with_cohere", lambda *a: calls.append("cohere") or []
+    )
+
+    monkeypatch.setattr("app.services.retrieval_service.settings.rerank_provider", "bedrock")
+    rerank_candidates("q", [], 3)
+    monkeypatch.setattr("app.services.retrieval_service.settings.rerank_provider", "cohere")
+    rerank_candidates("q", [], 3)
+
+    assert calls == ["bedrock", "cohere"]

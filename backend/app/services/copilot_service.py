@@ -20,19 +20,16 @@ from typing import Any
 
 from fastapi.concurrency import run_in_threadpool
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
-from langchain_openai import ChatOpenAI
 
 from app.api.chat import run_pipeline_once
 from app.core.config import settings
+from app.core.llm import get_chat_llm, message_text
 from app.core.request_context import build_internal_request_context
 from app.models.copilot import CopilotAction, CopilotMessage, CopilotResponse, CopilotToolCall
 from app.services import admin_service, audit_service, email_service
 
 logger = logging.getLogger(__name__)
 
-# Same tier already proven for rewrite/HyDE/the main answer generation —
-# tool-selection reasoning doesn't need the flagship model.
-OPENAI_COPILOT_MODEL_ID = "gpt-5.4-mini"
 MAX_TOOL_ITERATIONS = 5
 
 _SYSTEM_PROMPT = """\
@@ -152,8 +149,8 @@ _TOOL_SCHEMAS = [
 
 
 @lru_cache
-def _get_copilot_llm() -> ChatOpenAI:
-    return ChatOpenAI(api_key=settings.openai_api_key, model=OPENAI_COPILOT_MODEL_ID, temperature=0.1)
+def _get_copilot_llm():
+    return get_chat_llm("fast", temperature=0.1)
 
 
 async def _dispatch_tool(
@@ -272,10 +269,7 @@ async def run_copilot(
         messages.append(response)
 
         if not response.tool_calls:
-            content = response.content
-            if isinstance(content, list):
-                content = "".join(str(part) for part in content)
-            return CopilotResponse(answer=content, tool_calls=tool_calls_made, actions_taken=actions_taken)
+            return CopilotResponse(answer=message_text(response), tool_calls=tool_calls_made, actions_taken=actions_taken)
 
         for call in response.tool_calls:
             name = call["name"]

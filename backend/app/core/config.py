@@ -15,6 +15,18 @@ class Settings(BaseModel):
     opensearch_endpoint: str = os.getenv("OPENSEARCH_ENDPOINT", "")
     cohere_api_key: str = os.getenv("COHERE_API_KEY", "")
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+    # "openai" (default, existing behavior) or "bedrock" (Converse API).
+    llm_provider: str = os.getenv("LLM_PROVIDER", "openai").lower()
+    # Inference profile IDs (e.g. "us.anthropic.claude-sonnet-...") or model
+    # IDs enabled in the account's Bedrock model access.
+    bedrock_fast_model_id: str = os.getenv("BEDROCK_FAST_MODEL_ID", "")
+    bedrock_answer_model_id: str = os.getenv("BEDROCK_ANSWER_MODEL_ID", "")
+    # "cohere" (default, existing behavior) or "bedrock" (Bedrock Rerank API).
+    rerank_provider: str = os.getenv("RERANK_PROVIDER", "cohere").lower()
+    # Bedrock Rerank is only offered in some regions, which may differ from
+    # AWS_REGION — so it gets its own region and model.
+    bedrock_rerank_region: str = os.getenv("BEDROCK_RERANK_REGION", "us-west-2")
+    bedrock_rerank_model_id: str = os.getenv("BEDROCK_RERANK_MODEL_ID", "amazon.rerank-v1:0")
     bedrock_guardrail_id: str = os.getenv("BEDROCK_GUARDRAIL_ID", "")
     bedrock_guardrail_version: str = os.getenv("BEDROCK_GUARDRAIL_VERSION", "DRAFT")
     cognito_user_pool_id: str = os.getenv("COGNITO_USER_POOL_ID", "")

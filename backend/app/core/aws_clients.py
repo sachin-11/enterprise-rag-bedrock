@@ -36,6 +36,15 @@ def get_bedrock_runtime_client():
 
 
 @lru_cache
+def get_bedrock_rerank_client():
+    # Separate from get_bedrock_agent_runtime_client: the Rerank API is only
+    # available in some regions, which may not be the app's AWS_REGION.
+    return get_boto3_session().client(
+        "bedrock-agent-runtime", region_name=settings.bedrock_rerank_region or settings.aws_region
+    )
+
+
+@lru_cache
 def get_cognito_client():
     return get_boto3_session().client("cognito-idp")
 

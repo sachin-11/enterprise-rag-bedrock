@@ -1,4 +1,4 @@
-"""Hybrid retrieval: dense + sparse OpenSearch search, RRF fusion, Cohere rerank.
+"""Hybrid retrieval: dense + sparse OpenSearch search, RRF fusion, Cohere or Bedrock rerank.
 
 Expects an OpenSearch index with at least these fields per document:
   - `embedding`  (knn_vector) — used by retrieve_dense
@@ -20,7 +20,7 @@ import cohere
 from langchain_openai import OpenAIEmbeddings
 from langsmith import traceable
 
-from app.core.aws_clients import get_opensearch_client
+from app.core.aws_clients import get_bedrock_rerank_client, get_opensearch_client
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -223,3 +223,57 @@ def rerank_with_cohere(
         return candidates[:top_n]
 
     return [replace(candidates[result.index], score=result.relevance_score) for result in response.results]
+
+
+@traceable(name="rerank_with_bedrock", run_type="tool")
+def rerank_with_bedrock(
+    query: str,
+    candidates: list[RerankCandidate],
+    top_n: int = 5,
+) -> list[RerankCandidate]:
+    """Rerank `candidates` against `query` with the Bedrock Rerank API.
+
+    Same contract as rerank_with_cohere: any dataclass with `.text`/`.score`,
+    and a fallback to the first `top_n` candidates if the call fails.
+    """
+    if not candidates:
+        return []
+
+    model_arn = (
+        f"arn:aws:bedrock:{settings.bedrock_rerank_region or settings.aws_region}"
+        f"::foundation-model/{settings.bedrock_rerank_model_id}"
+    )
+    try:
+        response = get_bedrock_rerank_client().rerank(
+            queries=[{"type": "TEXT", "textQuery": {"text": query}}],
+            sources=[
+                {
+                    "type": "INLINE",
+                    "inlineDocumentSource": {"type": "TEXT", "textDocument": {"text": c.text}},
+                }
+                for c in candidates
+            ],
+            rerankingConfiguration={
+                "type": "BEDROCK_RERANKING_MODEL",
+                "bedrockRerankingConfiguration": {
+                    "modelConfiguration": {"modelArn": model_arn},
+                    "numberOfResults": min(top_n, len(candidates)),
+                },
+            },
+        )
+    except Exception as exc:  # boto/network errors: degrade, don't break retrieval.
+        logger.warning("Bedrock rerank failed, falling back to fusion order: %s", exc)
+        return candidates[:top_n]
+
+    return [replace(candidates[item["index"]], score=item["relevanceScore"]) for item in response["results"]]
+
+
+def rerank_candidates(
+    query: str,
+    candidates: list[RerankCandidate],
+    top_n: int = 5,
+) -> list[RerankCandidate]:
+    """Rerank with the provider selected by RERANK_PROVIDER."""
+    if settings.rerank_provider == "bedrock":
+        return rerank_with_bedrock(query, candidates, top_n)
+    return rerank_with_cohere(query, candidates, top_n)

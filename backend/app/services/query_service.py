@@ -1,4 +1,4 @@
-"""Query rewriting and HyDE passage generation via OpenAI.
+"""Query rewriting and HyDE passage generation via the configured chat LLM.
 
 Pure-ish service functions: the only side effect is the LLM call itself,
 wrapped with a single retry and a safe fallback so callers never have to
@@ -12,14 +12,12 @@ from functools import lru_cache
 from typing import Optional
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
 from langsmith import traceable
 
-from app.core.config import settings
+from app.core.llm import get_chat_llm, message_text
 
 logger = logging.getLogger(__name__)
 
-OPENAI_MODEL_ID = "gpt-5.4-mini"
 MAX_HISTORY_TURNS = 3
 MAX_RETRIES = 1
 
@@ -80,11 +78,11 @@ command."""
 
 
 @lru_cache
-def _get_llm(temperature: float = 0.0) -> ChatOpenAI:
+def _get_llm(temperature: float = 0.0):
     # Cached (keyed by temperature — only 0.0 and 0.3 are ever used here) so
     # every call reuses the same underlying HTTP client/connection pool
     # instead of paying a fresh TCP+TLS handshake on every request.
-    return ChatOpenAI(api_key=settings.openai_api_key, model=OPENAI_MODEL_ID, temperature=temperature)
+    return get_chat_llm("fast", temperature=temperature)
 
 
 def _invoke_with_retry(messages: list[BaseMessage], *, temperature: float = 0.0) -> Optional[str]:
@@ -95,18 +93,15 @@ def _invoke_with_retry(messages: list[BaseMessage], *, temperature: float = 0.0)
     for attempt in range(1, attempts + 1):
         try:
             response = llm.invoke(messages)
-            content = response.content
-            if isinstance(content, list):
-                content = "".join(str(part) for part in content)
-            text = str(content).strip()
+            text = message_text(response).strip()
             if text:
                 return text
-            last_error = ValueError("OpenAI returned an empty response")
+            last_error = ValueError("LLM returned an empty response")
         except Exception as exc:  # openai/langchain can raise many distinct error types.
             last_error = exc
-            logger.warning("OpenAI call failed on attempt %d/%d: %s", attempt, attempts, exc)
+            logger.warning("LLM call failed on attempt %d/%d: %s", attempt, attempts, exc)
 
-    logger.error("OpenAI call failed after %d attempt(s): %s", attempts, last_error)
+    logger.error("LLM call failed after %d attempt(s): %s", attempts, last_error)
     return None
 
 
@@ -131,7 +126,7 @@ def rewrite_query(query: str, chat_history: list[dict], history_summary: str = "
     recent turns so older context isn't simply dropped.
 
     Falls back to the original `query` unchanged if there's no history to
-    rewrite against, or if the OpenAI call fails after one retry.
+    rewrite against, or if the LLM call fails after one retry.
     """
     if not chat_history and not history_summary:
         return query
@@ -156,7 +151,7 @@ def rewrite_query(query: str, chat_history: list[dict], history_summary: str = "
 def generate_hyde_passage(query: str) -> Optional[str]:
     """Generate a short hypothetical answer passage for embedding-based retrieval (HyDE).
 
-    Returns None if the OpenAI call fails after one retry, so the caller can
+    Returns None if the LLM call fails after one retry, so the caller can
     skip HyDE and fall back to embedding the raw query.
     """
     messages: list[BaseMessage] = [
@@ -173,7 +168,7 @@ def summarize_history(existing_summary: str, turns_to_fold: list[dict]) -> str:
     summary.
 
     Falls back to existing_summary unchanged if there's nothing to fold, or
-    if the OpenAI call fails after one retry — an out-of-date summary is
+    if the LLM call fails after one retry — an out-of-date summary is
     safer than losing it entirely.
     """
     if not turns_to_fold:

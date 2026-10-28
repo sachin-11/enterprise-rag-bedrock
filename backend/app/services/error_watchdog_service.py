@@ -20,9 +20,9 @@ from functools import lru_cache
 
 from fastapi.concurrency import run_in_threadpool
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
 
 from app.core.config import settings
+from app.core.llm import get_chat_llm, message_text
 from app.core.request_context import build_internal_request_context
 from app.services import audit_service, auth_service, email_service
 
@@ -40,8 +40,6 @@ RETRY_BACKOFF_SECONDS = 2.0
 # skipped rather than each spawning their own redundant retry-storm.
 COOLDOWN_SECONDS = 900.0
 
-OPENAI_WATCHDOG_MODEL_ID = "gpt-5.4-mini"
-
 _last_investigation_started_at: dict[str, float] = {}
 
 _NOTIFICATION_SYSTEM_PROMPT = """\
@@ -52,8 +50,8 @@ likely cause. No greeting, no sign-off — just the explanation."""
 
 
 @lru_cache
-def _get_watchdog_llm() -> ChatOpenAI:
-    return ChatOpenAI(api_key=settings.openai_api_key, model=OPENAI_WATCHDOG_MODEL_ID, temperature=0.1)
+def _get_watchdog_llm():
+    return get_chat_llm("fast", temperature=0.1)
 
 
 def _in_cooldown(tenant_id: str) -> bool:
@@ -68,10 +66,7 @@ async def _compose_notification(query: str, error_detail: str, attempts: int) ->
         f"Final error: {error_detail}"
     )
     response = await llm.ainvoke([SystemMessage(content=_NOTIFICATION_SYSTEM_PROMPT), HumanMessage(content=human_prompt)])
-    content = response.content
-    if isinstance(content, list):
-        content = "".join(str(part) for part in content)
-    return content
+    return message_text(response)
 
 
 async def investigate_error(
