@@ -200,7 +200,7 @@ def main() -> None:
 
     rows = collect_eval_rows(test_set, args.base_url, args.tenant_id)
 
-    print("\nRunning ragas evaluation (judge provider: {args.judge_provider})...")
+    print(f"\nRunning ragas evaluation (judge provider: {args.judge_provider})...")
     result = run_ragas_evaluation(rows, args.judge_provider)
     result_df = result.to_pandas()
 
