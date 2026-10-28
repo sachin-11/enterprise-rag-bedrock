@@ -25,17 +25,24 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_INDEX_NAME = "documents"
-EMBEDDING_FIELD = "embedding"
-TEXT_FIELD = "text"
-TENANT_ID_FIELD = "tenant_id"
-COHERE_RERANK_MODEL = "rerank-v3.5"
-
 # Single source of truth for the embedding model: retrieve_dense's knn query
 # and whatever writes `embedding` into the index (see ingestion_service.py)
 # must use the same model/dimension or vector search silently degrades.
 EMBEDDING_MODEL_ID = "text-embedding-3-small"
-EMBEDDING_DIMENSION = 1536
+OPENAI_EMBEDDING_DIMENSION = 1536
+
+if settings.embedding_provider == "bedrock":
+    EMBEDDING_DIMENSION = settings.bedrock_embedding_dimension
+    # Different dimension from the OpenAI index, so it must be a different
+    # index — a knn_vector mapping can't change dimension in place.
+    DEFAULT_INDEX_NAME = f"documents-titan-v2-{EMBEDDING_DIMENSION}"
+else:
+    EMBEDDING_DIMENSION = OPENAI_EMBEDDING_DIMENSION
+    DEFAULT_INDEX_NAME = "documents"
+EMBEDDING_FIELD = "embedding"
+TEXT_FIELD = "text"
+TENANT_ID_FIELD = "tenant_id"
+COHERE_RERANK_MODEL = "rerank-v3.5"
 
 
 @dataclass
@@ -52,7 +59,19 @@ def _get_cohere_client() -> cohere.Client:
 
 
 @lru_cache
-def _get_embeddings_client() -> OpenAIEmbeddings:
+def _get_embeddings_client():
+    if settings.embedding_provider == "bedrock":
+        from langchain_aws import BedrockEmbeddings
+
+        from app.core.aws_clients import get_bedrock_runtime_client
+
+        # normalize=True so cosine/inner-product behave the same as with the
+        # unit-length OpenAI vectors the cache threshold was measured on.
+        return BedrockEmbeddings(
+            client=get_bedrock_runtime_client(),
+            model_id=settings.bedrock_embedding_model_id,
+            model_kwargs={"dimensions": EMBEDDING_DIMENSION, "normalize": True},
+        )
     return OpenAIEmbeddings(api_key=settings.openai_api_key, model=EMBEDDING_MODEL_ID)
 
 

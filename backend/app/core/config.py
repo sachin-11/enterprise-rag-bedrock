@@ -21,6 +21,13 @@ class Settings(BaseModel):
     # IDs enabled in the account's Bedrock model access.
     bedrock_fast_model_id: str = os.getenv("BEDROCK_FAST_MODEL_ID", "")
     bedrock_answer_model_id: str = os.getenv("BEDROCK_ANSWER_MODEL_ID", "")
+    # "openai" (default, existing behavior) or "bedrock" (Titan Text Embeddings
+    # v2). Switching changes the vector dimension, so it also switches to a
+    # different OpenSearch index — documents must be re-ingested into it.
+    embedding_provider: str = os.getenv("EMBEDDING_PROVIDER", "openai").lower()
+    bedrock_embedding_model_id: str = os.getenv("BEDROCK_EMBEDDING_MODEL_ID", "amazon.titan-embed-text-v2:0")
+    # Titan v2 supports 256, 512 or 1024.
+    bedrock_embedding_dimension: int = int(os.getenv("BEDROCK_EMBEDDING_DIMENSION", "1024"))
     # "cohere" (default, existing behavior) or "bedrock" (Bedrock Rerank API).
     rerank_provider: str = os.getenv("RERANK_PROVIDER", "cohere").lower()
     # Bedrock Rerank is only offered in some regions, which may differ from

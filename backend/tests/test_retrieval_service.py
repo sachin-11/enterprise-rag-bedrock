@@ -193,3 +193,20 @@ def test_rerank_candidates_dispatches_on_provider(monkeypatch):
     rerank_candidates("q", [], 3)
 
     assert calls == ["bedrock", "cohere"]
+
+
+def test_bedrock_embedding_client_uses_titan_v2_with_configured_dimension(monkeypatch):
+    from app.services import retrieval_service
+
+    monkeypatch.setattr(retrieval_service.settings, "embedding_provider", "bedrock")
+    monkeypatch.setattr(retrieval_service, "EMBEDDING_DIMENSION", 512)
+    monkeypatch.setattr("app.core.aws_clients.get_bedrock_runtime_client", lambda: MagicMock())
+    retrieval_service._get_embeddings_client.cache_clear()
+    try:
+        client = retrieval_service._get_embeddings_client()
+    finally:
+        retrieval_service._get_embeddings_client.cache_clear()
+
+    assert type(client).__name__ == "BedrockEmbeddings"
+    assert client.model_id == "amazon.titan-embed-text-v2:0"
+    assert client.model_kwargs == {"dimensions": 512, "normalize": True}
